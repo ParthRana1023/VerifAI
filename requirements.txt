@@ -1,0 +1,24 @@
+# Core dependencies
+praw
+python-dotenv
+langchain-groq
+pandas
+streamlit
+
+# Force specific versions
+pydantic>=2.5.0
+crewai>=0.28.0
+crewai-tools>=0.1.5
+
+# Additional dependencies
+requests
+beautifulsoup4
+lxml
+
+# Logging
+loguru
+
+# Data visualization
+plotly
+matplotlib
+seaborn
