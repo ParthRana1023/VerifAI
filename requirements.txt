@@ -1,7 +1,7 @@
 # Core dependencies
 praw
 python-dotenv
-langchain-groq
+ollama
 pandas
 streamlit
 

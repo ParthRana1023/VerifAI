@@ -1,62 +1,67 @@
-import getpass
-import os
-import warnings
-import yaml
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from crewai import LLM, Agent, Task, Crew
+from crewai import Agent, Task, Crew, Process
 from crewai_tools import SerperDevTool, ScrapeWebsiteTool, WebsiteSearchTool
+from crewai import LLM
+import os
+import streamlit as st
 from dotenv import load_dotenv
-
-# Suppress Pydantic deprecation warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+from pydantic import BaseModel, ConfigDict
+from typing import List, Dict, Any
 
 load_dotenv()
 
-# Modify the setup_api_keys function
-def setup_api_keys(force_reset=False):
-    # Check for existing keys
-    groq_key = os.getenv("GROQ_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+# Properly configure CrewAI to use Ollama
+def setup_crewai_config():
+    """Configure CrewAI to use Ollama instead of OpenAI"""
+    # Critical: Remove OpenAI key completely from environment
+    if "OPENAI_API_KEY" in os.environ:
+        del os.environ["OPENAI_API_KEY"]
     
-    # Only prompt if both are missing
-    if not (groq_key or openai_key) or force_reset:
-        choice = input("Choose LLM provider (1 for Groq, 2 for OpenAI): ")
-        if choice == "1":
-            groq_key = getpass.getpass("Enter your Groq API key: ")
-            os.environ["GROQ_API_KEY"] = groq_key
-        else:
-            openai_key = getpass.getpass("Enter your OpenAI API key: ")
-            os.environ["OPENAI_API_KEY"] = openai_key
+    # Ensure OpenAI key is not set to any value
+    os.environ.pop("OPENAI_API_KEY", None)
+    
+    # Set CrewAI to use Ollama explicitly
+    os.environ["CREWAI_LLM_PROVIDER"] = "ollama"
+    
+    # Set Ollama configuration
+    os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
+    
+    # Important: Set a dummy OpenAI key to prevent CrewAI from complaining
+    # This is a workaround for CrewAI's OpenAI dependency
+    os.environ["OPENAI_API_KEY"] = "dummy-key-for-ollama"
 
+def setup_api_keys():
     serper_key = os.getenv("SERPER_API_KEY")
-    if not serper_key or force_reset:
-        serper_key = getpass.getpass("Enter your Serper API key: ")
-        os.environ["SERPER_API_KEY"] = serper_key
+    if not serper_key:
+        st.error("SERPER_API_KEY is required. Please set it in your environment or .env file.")
+        return False
+    
+    return bool(serper_key)
 
-    return True
-
-# Update the LLM creation function
 def get_llm():
-    if os.getenv("GROQ_API_KEY"):
+    """Get properly configured LLM instance for Ollama"""
+    try:
+        # Method 1: Try the most explicit Ollama configuration
         return LLM(
-            temperature=0.3,
-            model="groq/llama-3.2-3b-preview"
+            model="ollama/mistral:latest",
+            base_url="http://localhost:11434"
         )
-    elif os.getenv("OPENAI_API_KEY"):
-        return LLM(
-            temperature=0.3,
-            model="gpt-4-turbo"
-        )
-    else:
-        raise ValueError("No valid API key found for LLM provider")
-
-# def get_groq_llm():
-#     return LLM(
-#         temperature=0.3,
-#         model="groq/llama-3.2-3b-preview"
-#         # groq_api_key=os.getenv("GROQ_API_KEY")
-#     )
+    except Exception as e:
+        st.warning(f"Primary LLM config failed: {e}")
+        try:
+            # Method 2: Alternative configuration
+            return LLM(
+                model="ollama/mistral:latest",
+                base_url="http://localhost:11434",
+                api_key="not-needed-for-ollama"
+            )
+        except Exception as e2:
+            st.error(f"Secondary LLM config failed: {e2}")
+            try:
+                # Method 3: Minimal configuration
+                return LLM(model="ollama/mistral:latest")
+            except Exception as e3:
+                st.error(f"All LLM configurations failed: {e3}")
+                return None
 
 class SourceReliability(BaseModel):
     domain: str
@@ -126,7 +131,6 @@ class EnhancedPropagandaAnalysis(BaseModel):
     cross_verification_results: Dict[str, Any]  # Results of cross-verification with reliable sources
     recommended_verification_steps: List[str]  # Recommended steps for readers to verify content
 
-
 class NewsAnalysisReport(BaseModel):
     query_summary: str
     key_findings: str
@@ -145,71 +149,84 @@ class NewsAnalysisReport(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 def create_news_analysis_agents():
-    llm = get_llm() 
+    # Setup CrewAI configuration first
+    setup_crewai_config()
+    
+    # Initialize LLM with proper error handling
+    llm = get_llm()
+    if not llm:
+        st.error("Failed to initialize LLM")
+        return None
 
-    return [
-        Agent(
-            role="Web Crawler",
-            goal="Extract news data for the query",
-            backstory="An expert web crawler specialized in news sites, capable of identifying reliable sources and extracting relevant articles efficiently.",
-            tools=[ScrapeWebsiteTool(), WebsiteSearchTool(), SerperDevTool()],
-            tool_calls=True,
-            llm=llm,  # Assign Groq LLM
-            verbose=True
-        ),
-        Agent(
-            role="News Content Analyst",
-            goal="Analyze news content in depth",
-            backstory="A seasoned journalist with expertise in fact-checking, source reliability assessment, and content analysis who can identify credible sources, biases, and trends in news articles.",
-            tools=[ScrapeWebsiteTool(), WebsiteSearchTool(), SerperDevTool()],
-            tool_calls=True,
-            llm=llm,  # Assign Groq LLM
-            verbose=True
-        ),
-        Agent(
-            role="Social Media Tracking Specialist",
-            goal="Track news spread on social media",
-            backstory="A social media expert who specializes in tracking how news spreads across platforms, identifying trending hashtags, measuring engagement, and analyzing sentiment related to news topics.",
-            tools=[WebsiteSearchTool(), SerperDevTool()],
-            tool_calls=True,
-            llm=llm,  # Assign Groq LLM
-            verbose=True
-        ),
-        Agent(
-            role="News Data Visualization Expert",
-            goal="Create data visualizations from news analysis",
-            backstory="A data visualization specialist who transforms news analysis data into meaningful visual representations including topic clusters, wordclouds, time series graphs, and reliability charts.",
-            tools=[SerperDevTool()],
-            tool_calls=True,
-            llm=llm,  # Assign Groq LLM
-            verbose=True
-        ),
-        Agent(
-        role="Propaganda & Misinformation Analyst",
-        goal="Identify and quantify propaganda, misinformation, and coordinated inauthentic behavior in news content",
-        backstory="""An expert with advanced training in computational propaganda detection, 
-                   misinformation analysis, and network forensics. Specialized in identifying 
-                   manipulation techniques, assessing credibility signals, detecting narrative 
-                   manipulation, and tracing the spread of false information across media ecosystems.
-                   Has experience working with fact-checking organizations and research institutions 
-                   on digital media literacy.""",
-        tools=[ScrapeWebsiteTool(), SerperDevTool(), WebsiteSearchTool()],
-        tool_calls=True,
-        llm=llm,  # Assign Groq LLM
-        verbose=True,
-        allow_delegation=True
-        ),
-        Agent(
-            role="News Report Generator",
-            goal="Compile findings into a comprehensive news analysis report",
-            backstory="A professional report writer specialized in organizing complex news analysis data into structured, insightful, and actionable reports with clear visualizations and fact comparisons.",
-            tool_calls=False,
-            llm=llm,  # Assign Groq LLM
-            verbose=True
-        )
-    ]
+    try:
+        return [
+            Agent(
+                role="Web Crawler",
+                goal="Extract news data for the query",
+                backstory="An expert web crawler specialized in news sites, capable of identifying reliable sources and extracting relevant articles efficiently.",
+                tools=[ScrapeWebsiteTool(), WebsiteSearchTool(), SerperDevTool()],
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            ),
+            Agent(
+                role="News Content Analyst",
+                goal="Analyze news content in depth",
+                backstory="A seasoned journalist with expertise in fact-checking, source reliability assessment, and content analysis who can identify credible sources, biases, and trends in news articles.",
+                tools=[ScrapeWebsiteTool(), WebsiteSearchTool(), SerperDevTool()],
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            ),
+            Agent(
+                role="Social Media Tracking Specialist",
+                goal="Track news spread on social media",
+                backstory="A social media expert who specializes in tracking how news spreads across platforms, identifying trending hashtags, measuring engagement, and analyzing sentiment related to news topics.",
+                tools=[WebsiteSearchTool(), SerperDevTool()],
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            ),
+            Agent(
+                role="News Data Visualization Expert",
+                goal="Create data visualizations from news analysis",
+                backstory="A data visualization specialist who transforms news analysis data into meaningful visual representations including topic clusters, wordclouds, time series graphs, and reliability charts.",
+                tools=[SerperDevTool()],
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            ),
+            Agent(
+                role="Propaganda & Misinformation Analyst",
+                goal="Identify and quantify propaganda, misinformation, and coordinated inauthentic behavior in news content",
+                backstory="""An expert with advanced training in computational propaganda detection, 
+                           misinformation analysis, and network forensics. Specialized in identifying 
+                           manipulation techniques, assessing credibility signals, detecting narrative 
+                           manipulation, and tracing the spread of false information across media ecosystems.
+                           Has experience working with fact-checking organizations and research institutions 
+                           on digital media literacy.""",
+                tools=[ScrapeWebsiteTool(), SerperDevTool(), WebsiteSearchTool()],
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            ),
+            Agent(
+                role="News Report Generator",
+                goal="Compile findings into a comprehensive news analysis report",
+                backstory="A professional report writer specialized in organizing complex news analysis data into structured, insightful, and actionable reports with clear visualizations and fact comparisons.",
+                llm=llm,
+                verbose=True,
+                allow_delegation=False
+            )
+        ]
+    except Exception as e:
+        st.error(f"Failed to create agents: {e}")
+        return None
 
 def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, keywords=None):
+    if not agents:
+        return None
+        
     return [
         Task(
             description=f"Crawl news websites for articles related to: {user_query}. Identify reliable and unreliable sources. Extract article URLs, publication dates, and engagement metrics.",
@@ -292,173 +309,216 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
     ]
 
 def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None):
-    llm = get_llm() 
+    # Setup CrewAI configuration
+    setup_crewai_config()
+    
     agents = create_news_analysis_agents()
+    if not agents:
+        st.error("Failed to create agents")
+        return None
+        
     tasks = create_news_analysis_tasks(agents, user_query, urls, hashtags, keywords)
-    return Crew(agents=agents, tasks=tasks, process="sequential", llm=llm,  # Assign Groq LLM
-            verbose=True)
+    if not tasks:
+        st.error("Failed to create tasks")
+        return None
+        
+    try:
+        return Crew(
+            agents=agents, 
+            tasks=tasks, 
+            process=Process.sequential,
+            memory=False,  # Disable memory to avoid potential issues
+            verbose=True
+        )
+    except Exception as e:
+        st.error(f"Failed to create crew: {e}")
+        return None
 
 def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
-    crew = create_news_analysis_crew(user_query, urls, hashtags, keywords)
-    result = crew.kickoff(inputs={'query': user_query, 'urls': urls, 'hashtags': hashtags, 'keywords': keywords})
-    return result.pydantic
+    try:
+        # Ensure configuration is set up
+        setup_crewai_config()
+        
+        crew = create_news_analysis_crew(user_query, urls, hashtags, keywords)
+        if not crew:
+            st.error("Failed to create analysis crew")
+            return None
+            
+        result = crew.kickoff(inputs={
+            'query': user_query, 
+            'urls': urls or [], 
+            'hashtags': hashtags or [], 
+            'keywords': keywords or []
+        })
+        
+        return result.pydantic if hasattr(result, 'pydantic') else result
+    except Exception as e:
+        st.error(f"Analysis failed: {str(e)}")
+        # Print more detailed error info
+        import traceback
+        st.error(f"Detailed error: {traceback.format_exc()}")
+        return None
 
 def save_report_to_file(report, filename="news_analysis_report.md"):
-    with open(filename, "w") as f:
-        # Key Findings & Summary
-        f.write(f"# News Analysis Report: {report.query_summary}\n\n")
-        f.write("## Key Findings & Summary\n\n")
-        f.write(f"{report.key_findings}\n\n")
-        
-        # Related Articles
-        f.write("## Related Articles\n\n")
-        for article in report.related_articles:
-            for title, url in article.items():
-                f.write(f"- [{title}]({url})\n")
-        f.write("\n")
-        
-        # Related Words (wordcloud)
-        f.write("## Related Words\n\n")
-        f.write("*Wordcloud visualization would show these terms with size relative to frequency:*\n\n")
-        f.write(", ".join(report.related_words))
-        f.write("\n\n")
-        
-        # Topic Clusters
-        f.write("## Related Topic Clusters\n\n")
-        f.write("*Visualization would show bubbles with sizes relative to prevalence:*\n\n")
-        for cluster in report.topic_clusters:
-            f.write(f"- **{cluster.get('topic', 'N/A')}** (Size: {cluster.get('size', 'N/A')})\n")
-            # Check if 'related_narratives' key exists before accessing it
-            related_narratives = cluster.get('related_narratives', [])  # Default to empty list if not found
-            if related_narratives:
-                f.write("  - Related narratives: " + ", ".join(related_narratives) + "\n")
-        f.write("\n")
-        
-        # Top Sources
-        f.write("## List of Top Sources\n\n")
-        f.write("| Domain | Factual | Articles | Engagement |\n")
-        f.write("|--------|---------|----------|------------|\n")
-        for source in report.top_sources:
-            f.write(f"| {source.domain} | {source.factual_rating} | {source.articles_count} | {source.engagement} |\n")
-        f.write("\n")
-        
-        # Top Hashtags
-        f.write("## Top Hashtags\n\n")
-        f.write("| Hashtag | Engagement Rate (%) | Reach | Sentiment |\n")
-        f.write("|---------|---------------------|-------|------------|\n")
-        for hashtag in report.top_hashtags:
-            f.write(f"| {hashtag.hashtag} | {hashtag.engagement_rate} | {hashtag.reach} | {hashtag.sentiment} |\n")
-        f.write("\n")
-        
-        # Time Series Graph
-        f.write("## Similar Posts Spread Over Time\n\n")
-        f.write("*Time series visualization would show:*\n\n")
-        for data_point in report.similar_posts_time_series:
-            f.write(f"- {data_point.date}: {data_point.count} posts\n")
-        f.write("\n")
-        
-        # Fake News Sites
-        f.write("## Most Shared Fake News Sites\n\n")
-        f.write("*Line chart visualization would show:*\n\n")
-        for site in report.fake_news_sites:
-            # Check if 'site' and 'shares' keys exist before accessing them
-            site_name = site.get('site', 'N/A')  # Default to 'N/A' if 'site' key is missing
-            shares = site.get('shares', 0)  # Default to 0 if 'shares' key is missing
-            f.write(f"- {site_name}: {shares} shares\n")
-        f.write("\n")
-        
-        # Content Analysis Metrics
-        f.write("## Content Analysis Metrics\n\n")
-        f.write("*Percentage bars visualization would show:*\n\n")
-        f.write(f"- Language: {report.content_analysis.language_percentage}%\n")
-        f.write(f"- Coordination: {report.content_analysis.coordination_percentage}%\n")
-        f.write(f"- Source: {report.content_analysis.source_percentage}%\n")
-        f.write(f"- Bot-like activity: {report.content_analysis.bot_like_activity_percentage}%\n")
-        f.write("\n")
-        
-        # Propaganda News
-        f.write("## Propaganda and Misinformation Analysis\n\n")
-    
-        f.write(f"### Overall Reliability Score: {report.propaganda_analysis.overall_reliability_score}/100\n\n")
-    
-        f.write("### Propaganda Techniques Detected\n\n")
-        f.write("| Technique | Frequency | Severity (0-10) | Example |\n")
-        f.write("|-----------|-----------|-----------------|--------|\n")
-        for technique in report.propaganda_analysis.propaganda_techniques:
-            f.write(f"| **{technique.technique_name}** | {technique.frequency} | {technique.severity} | {technique.example} |\n")
-        f.write("\n*Explanation of techniques:*\n\n")
-        for technique in report.propaganda_analysis.propaganda_techniques:
-            f.write(f"- **{technique.technique_name}**: {technique.explanation}\n")
-        f.write("\n")
-    
-        f.write("### Misinformation Indicators\n\n")
-        f.write("| Type | Confidence | Correction | Verification Sources |\n")
-        f.write("|------|------------|------------|----------------------|\n")
-        for indicator in report.propaganda_analysis.misinformation_indicators:
-            sources = ", ".join(indicator.source_verification)
-            f.write(f"| {indicator.indicator_type} | {indicator.confidence*100:.1f}% | {indicator.correction} | {sources} |\n")
-        f.write("\n")
-    
-        f.write("### Coordination Patterns\n\n")
-        for pattern in report.propaganda_analysis.coordination_patterns:
-            f.write(f"**{pattern.pattern_type}** (Strength: {pattern.strength*100:.1f}%)\n")
-            f.write(f"- Entities involved: {', '.join(pattern.entities_involved)}\n")
-            f.write(f"- Timeline: {pattern.timeline}\n\n")
-    
-        f.write("### Bot Activity Metrics\n\n")
-        bot_metrics = report.propaganda_analysis.bot_activity_metrics
-        f.write(f"**Bot Likelihood Score: {bot_metrics.bot_likelihood_score*100:.1f}%**\n\n")
-        f.write(f"Account Creation Patterns: {bot_metrics.account_creation_patterns}\n\n")
-        f.write("Behavioral Indicators:\n")
-        for indicator in bot_metrics.behavioral_indicators:
-            f.write(f"- {indicator}\n")
-        f.write(f"\nNetwork Analysis: {bot_metrics.network_analysis}\n\n")
-    
-        f.write("### Most Shared Fake News Sites\n\n")
-        f.write("| Domain | Shares | Engagement | Known False Stories | Verification Failures |\n")
-        f.write("|--------|--------|------------|---------------------|----------------------|\n")
-        for site in report.propaganda_analysis.fake_news_sites:
-            failures = ", ".join(site.verification_failures[:2]) + (", ..." if len(site.verification_failures) > 2 else "")
-            f.write(f"| {site.domain} | {site.shares} | {site.engagement} | {site.known_false_stories} | {failures} |\n")
-        f.write("\n")
-    
-        f.write("### Deceptive Practices by Domain\n\n")
-        for site in report.propaganda_analysis.fake_news_sites:
-            f.write(f"**{site.domain}**:\n")
-            for practice in site.deceptive_practices:
-                f.write(f"- {practice}\n")
+    try:
+        with open(filename, "w", encoding='utf-8') as f:
+            # Key Findings & Summary
+            f.write(f"# News Analysis Report: {report.query_summary}\n\n")
+            f.write("## Key Findings & Summary\n\n")
+            f.write(f"{report.key_findings}\n\n")
+            
+            # Related Articles
+            f.write("## Related Articles\n\n")
+            for article in report.related_articles:
+                for title, url in article.items():
+                    f.write(f"- [{title}]({url})\n")
             f.write("\n")
-    
-        f.write("### Information Manipulation Timeline\n\n")
-        f.write("*Timeline showing how information evolved and spread:*\n\n")
-        for entry in report.propaganda_analysis.manipulation_timeline:
-            f.write(f"- **{entry.get('date', 'N/A')}**: {entry.get('event', 'N/A')}\n")
-        f.write("\n")
-    
-        f.write("### Narrative Fingerprint\n\n")
-        f.write("*Distinctive narrative patterns and their strength:*\n\n")
-        for narrative, strength in report.propaganda_analysis.narrative_fingerprint.items():
-            f.write(f"- **{narrative}**: {strength*100:.1f}%\n")
-        f.write("\n")
-    
-        f.write("### How to Verify This Information\n\n")
-        for i, step in enumerate(report.propaganda_analysis.recommended_verification_steps, 1):
-            f.write(f"{i}. {step}\n")
-        f.write("\n")
+            
+            # Related Words (wordcloud)
+            f.write("## Related Words\n\n")
+            f.write("*Wordcloud visualization would show these terms with size relative to frequency:*\n\n")
+            f.write(", ".join(report.related_words))
+            f.write("\n\n")
+            
+            # Topic Clusters
+            f.write("## Related Topic Clusters\n\n")
+            f.write("*Visualization would show bubbles with sizes relative to prevalence:*\n\n")
+            for cluster in report.topic_clusters:
+                f.write(f"- **{cluster.get('topic', 'N/A')}** (Size: {cluster.get('size', 'N/A')})\n")
+                related_narratives = cluster.get('related_narratives', [])
+                if related_narratives:
+                    f.write("  - Related narratives: " + ", ".join(related_narratives) + "\n")
+            f.write("\n")
+            
+            # Top Sources
+            f.write("## List of Top Sources\n\n")
+            f.write("| Domain | Factual | Articles | Engagement |\n")
+            f.write("|--------|---------|----------|------------|\n")
+            for source in report.top_sources:
+                f.write(f"| {source.domain} | {source.factual_rating} | {source.articles_count} | {source.engagement} |\n")
+            f.write("\n")
+            
+            # Top Hashtags
+            f.write("## Top Hashtags\n\n")
+            f.write("| Hashtag | Engagement Rate (%) | Reach | Sentiment |\n")
+            f.write("|---------|---------------------|-------|------------|\n")
+            for hashtag in report.top_hashtags:
+                f.write(f"| {hashtag.hashtag} | {hashtag.engagement_rate} | {hashtag.reach} | {hashtag.sentiment} |\n")
+            f.write("\n")
+            
+            # Time Series Graph
+            f.write("## Similar Posts Spread Over Time\n\n")
+            f.write("*Time series visualization would show:*\n\n")
+            for data_point in report.similar_posts_time_series:
+                f.write(f"- {data_point.date}: {data_point.count} posts\n")
+            f.write("\n")
+            
+            # Fake News Sites
+            f.write("## Most Shared Fake News Sites\n\n")
+            f.write("*Line chart visualization would show:*\n\n")
+            for site in report.fake_news_sites:
+                site_name = site.get('site', 'N/A')
+                shares = site.get('shares', 0)
+                f.write(f"- {site_name}: {shares} shares\n")
+            f.write("\n")
+            
+            # Content Analysis Metrics
+            f.write("## Content Analysis Metrics\n\n")
+            f.write("*Percentage bars visualization would show:*\n\n")
+            f.write(f"- Language: {report.content_analysis.language_percentage}%\n")
+            f.write(f"- Coordination: {report.content_analysis.coordination_percentage}%\n")
+            f.write(f"- Source: {report.content_analysis.source_percentage}%\n")
+            f.write(f"- Bot-like activity: {report.content_analysis.bot_like_activity_percentage}%\n")
+            f.write("\n")
+            
+            # Propaganda Analysis
+            f.write("## Propaganda and Misinformation Analysis\n\n")
+            f.write(f"### Overall Reliability Score: {report.propaganda_analysis.overall_reliability_score}/100\n\n")
+            
+            f.write("### Propaganda Techniques Detected\n\n")
+            f.write("| Technique | Frequency | Severity (0-10) | Example |\n")
+            f.write("|-----------|-----------|-----------------|--------|\n")
+            for technique in report.propaganda_analysis.propaganda_techniques:
+                f.write(f"| **{technique.technique_name}** | {technique.frequency} | {technique.severity} | {technique.example} |\n")
+            f.write("\n*Explanation of techniques:*\n\n")
+            for technique in report.propaganda_analysis.propaganda_techniques:
+                f.write(f"- **{technique.technique_name}**: {technique.explanation}\n")
+            f.write("\n")
         
-        # Facts Comparison
-        f.write("## Facts Gathered from Platform\n\n")
-        for fact in report.platform_facts:
-            f.write(f"- {fact}\n")
-        f.write("\n")
+            f.write("### Misinformation Indicators\n\n")
+            f.write("| Type | Confidence | Correction | Verification Sources |\n")
+            f.write("|------|------------|------------|----------------------|\n")
+            for indicator in report.propaganda_analysis.misinformation_indicators:
+                sources = ", ".join(indicator.source_verification)
+                f.write(f"| {indicator.indicator_type} | {indicator.confidence*100:.1f}% | {indicator.correction} | {sources} |\n")
+            f.write("\n")
         
-        f.write("## Facts Gathered from Relevant Sources\n\n")
-        for fact in report.cross_source_facts:
-            f.write(f"- {fact}\n")
-    
-    print(f"Report saved to {filename}")
+            f.write("### Coordination Patterns\n\n")
+            for pattern in report.propaganda_analysis.coordination_patterns:
+                f.write(f"**{pattern.pattern_type}** (Strength: {pattern.strength*100:.1f}%)\n")
+                f.write(f"- Entities involved: {', '.join(pattern.entities_involved)}\n")
+                f.write(f"- Timeline: {pattern.timeline}\n\n")
+        
+            f.write("### Bot Activity Metrics\n\n")
+            bot_metrics = report.propaganda_analysis.bot_activity_metrics
+            f.write(f"**Bot Likelihood Score: {bot_metrics.bot_likelihood_score*100:.1f}%**\n\n")
+            f.write(f"Account Creation Patterns: {bot_metrics.account_creation_patterns}\n\n")
+            f.write("Behavioral Indicators:\n")
+            for indicator in bot_metrics.behavioral_indicators:
+                f.write(f"- {indicator}\n")
+            f.write(f"\nNetwork Analysis: {bot_metrics.network_analysis}\n\n")
+        
+            f.write("### Most Shared Fake News Sites\n\n")
+            f.write("| Domain | Shares | Engagement | Known False Stories | Verification Failures |\n")
+            f.write("|--------|--------|------------|---------------------|----------------------|\n")
+            for site in report.propaganda_analysis.fake_news_sites:
+                failures = ", ".join(site.verification_failures[:2]) + (", ..." if len(site.verification_failures) > 2 else "")
+                f.write(f"| {site.domain} | {site.shares} | {site.engagement} | {site.known_false_stories} | {failures} |\n")
+            f.write("\n")
+        
+            f.write("### Deceptive Practices by Domain\n\n")
+            for site in report.propaganda_analysis.fake_news_sites:
+                f.write(f"**{site.domain}**:\n")
+                for practice in site.deceptive_practices:
+                    f.write(f"- {practice}\n")
+                f.write("\n")
+        
+            f.write("### Information Manipulation Timeline\n\n")
+            f.write("*Timeline showing how information evolved and spread:*\n\n")
+            for entry in report.propaganda_analysis.manipulation_timeline:
+                f.write(f"- **{entry.get('date', 'N/A')}**: {entry.get('event', 'N/A')}\n")
+            f.write("\n")
+        
+            f.write("### Narrative Fingerprint\n\n")
+            f.write("*Distinctive narrative patterns and their strength:*\n\n")
+            for narrative, strength in report.propaganda_analysis.narrative_fingerprint.items():
+                f.write(f"- **{narrative}**: {strength*100:.1f}%\n")
+            f.write("\n")
+        
+            f.write("### How to Verify This Information\n\n")
+            for i, step in enumerate(report.propaganda_analysis.recommended_verification_steps, 1):
+                f.write(f"{i}. {step}\n")
+            f.write("\n")
+            
+            # Facts Comparison
+            f.write("## Facts Gathered from Platform\n\n")
+            for fact in report.platform_facts:
+                f.write(f"- {fact}\n")
+            f.write("\n")
+            
+            f.write("## Facts Gathered from Relevant Sources\n\n")
+            for fact in report.cross_source_facts:
+                f.write(f"- {fact}\n")
+        
+        print(f"Report saved to {filename}")
+        return True
+    except Exception as e:
+        st.error(f"Failed to save report: {e}")
+        return False
 
 def main():
+    setup_crewai_config()
+    
     if not setup_api_keys():
         print("Invalid API keys. Exiting.")
         return
@@ -469,7 +529,10 @@ def main():
     keywords = input("Enter additional keywords (comma-separated, optional): ").split(',') if input("Include additional keywords? (y/n): ").lower() == 'y' else None
     
     report = run_news_analysis(user_query, urls, hashtags, keywords)
-    save_report_to_file(report)
+    if report:
+        save_report_to_file(report)
+    else:
+        print("Failed to generate report")
 
 if __name__ == "__main__":
     main()
