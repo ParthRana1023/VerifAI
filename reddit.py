@@ -3,7 +3,9 @@ import praw
 import re
 import logging
 from collections import Counter
-from app import run_news_analysis, save_report_to_file, setup_api_keys
+from app import run_news_analysis
+from save_report import save_report_to_file
+from setup import setup_api_keys
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

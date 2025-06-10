@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import logging
-from app import run_news_analysis, setup_api_keys, setup_crewai_config
+from app import run_news_analysis, setup_api_keys
 from reddit import scrape_reddit_data, extract_keywords, is_reddit_url
 
 # Set up logging
