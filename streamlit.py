@@ -6,7 +6,6 @@ import logging
 from app import run_news_analysis, setup_api_keys
 from reddit import scrape_reddit_data, extract_keywords, is_reddit_url
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
