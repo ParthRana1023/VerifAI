@@ -40,12 +40,12 @@ def create_news_analysis_agents():
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
-                # Disable memory to avoid issues
+                # Disable memory and function calling to avoid compatibility issues
                 memory=False,
-                # Add max_iter to prevent infinite loops
-                max_iter=3,
-                # Set max execution time
-                max_execution_time=300  # 5 minutes
+                max_iter=2,  # Reduced to prevent timeout
+                max_execution_time=180,  # 3 minutes
+                # Disable step callback which can cause issues
+                step_callback=None
             ),
             Agent(
                 role="News Content Analyst",
@@ -56,8 +56,9 @@ def create_news_analysis_agents():
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=3,
-                max_execution_time=300
+                max_iter=2,
+                max_execution_time=180,
+                step_callback=None
             ),
             Agent(
                 role="Social Media Tracking Specialist", 
@@ -68,8 +69,9 @@ def create_news_analysis_agents():
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=3,
-                max_execution_time=300
+                max_iter=2,
+                max_execution_time=180,
+                step_callback=None
             ),
             Agent(
                 role="News Data Visualization Expert",
@@ -80,8 +82,9 @@ def create_news_analysis_agents():
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=3,
-                max_execution_time=300
+                max_iter=2,
+                max_execution_time=180,
+                step_callback=None
             ),
             Agent(
                 role="Propaganda & Misinformation Analyst",
@@ -89,16 +92,15 @@ def create_news_analysis_agents():
                 backstory="""An expert with advanced training in computational propaganda detection, 
                            misinformation analysis, and network forensics. Specialized in identifying 
                            manipulation techniques, assessing credibility signals, detecting narrative 
-                           manipulation, and tracing the spread of false information across media ecosystems.
-                           Has experience working with fact-checking organizations and research institutions 
-                           on digital media literacy.""",
+                           manipulation, and tracing the spread of false information across media ecosystems.""",
                 tools=[scrape_tool, serper_tool, search_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=3,
-                max_execution_time=300
+                max_iter=2,
+                max_execution_time=180,
+                step_callback=None
             ),
             Agent(
                 role="News Report Generator",
@@ -108,8 +110,9 @@ def create_news_analysis_agents():
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=3,
-                max_execution_time=300
+                max_iter=2,
+                max_execution_time=180,
+                step_callback=None
             )
         ]
     except Exception as e:
