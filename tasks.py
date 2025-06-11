@@ -23,9 +23,7 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Keep the analysis focused and avoid complex JSON structures.""",
             agent=agents[0],
-            expected_output="A simple list of news articles with their sources, basic reliability assessment, and key metadata. Format as plain text with clear sections.",
-            # Remove complex output requirements
-            context=f"Query: {user_query}, URLs: {urls or []}, Keywords: {keywords or []}"
+            expected_output="A simple list of news articles with their sources, basic reliability assessment, and key metadata. Format as plain text with clear sections."
         ),
         Task(
             description=f"""Analyze the content of collected news articles for: {user_query}. 
@@ -39,8 +37,7 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Provide clear, structured output without complex formatting.""",
             agent=agents[1],
-            expected_output="Content analysis with key findings, related words, main topics, and basic fact assessment. Use simple text format with clear headings.",
-            context=f"Analyzing articles for query: {user_query}"
+            expected_output="Content analysis with key findings, related words, main topics, and basic fact assessment. Use simple text format with clear headings."
         ),
         Task(
             description=f"""Track how the news topic '{user_query}' is spreading on social media.
@@ -54,8 +51,7 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Focus on observable patterns rather than complex metrics.""",
             agent=agents[2],
-            expected_output="Social media analysis with top hashtags, basic engagement info, general sentiment, and simple timeline. Use plain text format.",
-            context=f"Social media tracking for: {user_query}"
+            expected_output="Social media analysis with top hashtags, basic engagement info, general sentiment, and simple timeline. Use plain text format."
         ),
         Task(
             description=f"""Create simple data structures for visualization of the news analysis.
@@ -69,8 +65,7 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Focus on organizing existing data rather than creating complex visualizations.""",
             agent=agents[3],
-            expected_output="Organized data structures for visualization including topic groups, timeline data, and source information. Use simple, clear formatting.",
-            context=f"Preparing visualization data for: {user_query}"
+            expected_output="Organized data structures for visualization including topic groups, timeline data, and source information. Use simple, clear formatting."
         ),
         Task(
             description=f"""Conduct basic analysis of news content for propaganda and misinformation patterns.
@@ -84,8 +79,7 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Focus on clear, observable patterns rather than deep analysis. Keep findings simple and well-supported.""",
             agent=agents[4],
-            expected_output="Basic propaganda and misinformation analysis with clear examples, simple reliability scores, and verification suggestions. Use plain text with clear sections.",
-            context=f"Analyzing content reliability for: {user_query}"
+            expected_output="Basic propaganda and misinformation analysis with clear examples, simple reliability scores, and verification suggestions. Use plain text with clear sections."
         ),
         Task(
             description=f"""Generate a comprehensive but simple news analysis report.
@@ -97,10 +91,15 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             4. Keep the report readable and well-organized
             5. Ensure all sections are populated with relevant information
             
-            Create a complete report that summarizes all the analysis work.""",
+            Create a complete report that summarizes all the analysis work.
+            
+            Additional context:
+            - Query: {user_query}
+            - URLs: {urls or []}
+            - Keywords: {keywords or []}
+            - Hashtags: {hashtags or []}""",
             agent=agents[5],
             expected_output="A complete news analysis report with all required sections filled out clearly and comprehensively.",
-            output_pydantic=NewsAnalysisReport,
-            context=f"Generating final report for: {user_query}"
+            output_pydantic=NewsAnalysisReport
         )
     ]
