@@ -119,22 +119,72 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             4. Add practical recommendations for readers
             5. Keep the language clear and accessible
             
-            Create a complete report with these sections:
-            - Executive Summary
-            - Key Findings
-            - Source Analysis
-            - Social Media Activity
-            - Credibility Assessment
-            - Recommendations for Readers
-            
-            Make sure the report is informative and well-organized.
+            Create a complete report in JSON format, strictly following the NewsAnalysisReport Pydantic model schema. Ensure all fields are populated accurately based on the analysis.
             
             Context:
             - Query: {user_query}
             - URLs: {urls or 'None provided'}
             - Keywords: {keywords or 'None provided'}
-            - Hashtags: {hashtags or 'None provided'}""",
+            - Hashtags: {hashtags or 'None provided'}
+            
+            Output MUST be a valid JSON object, with no additional text or formatting outside the JSON.
+            Example of expected JSON structure:
+            ```json
+            {
+                "executive_summary": "...",
+                "key_findings": [
+                    {
+                        "title": "...",
+                        "summary": "..."
+                    }
+                ],
+                "source_reliability": [
+                    {
+                        "source": "...",
+                        "reliability": "...",
+                        "bias": "..."
+                    }
+                ],
+                "social_media_metrics": {
+                    "top_hashtags": ["#..."],
+                    "engagement_level": "...",
+                    "overall_sentiment": "...",
+                    "trending_patterns": "..."
+                }
+                "time_series_data": [
+                    {
+                        "date": "YYYY-MM-DD",
+                        "value": 0
+                    }
+                ],
+                "propaganda_techniques": [
+                    {
+                        "technique": "...",
+                        "example": "..."
+                    }
+                ],
+                "misinformation_indicators": [
+                    {
+                        "indicator": "...",
+                        "description": "..."
+                    }
+                ],
+                "fake_news_sites": [
+                    {
+                        "site_name": "...",
+                        "reason": "..."
+                    }
+                ],
+                "credibility_score": [
+                    "score": 0,
+                    "explanation": "..."
+                ],
+                "recommendations": [
+                    "..."
+                ]
+            }
+            ```""",
             agent=agents[5],
-            expected_output="A comprehensive news analysis report with executive summary, key findings, source analysis, social media activity, credibility assessment, and reader recommendations. The report should be well-structured and informative."
+            expected_output="A comprehensive news analysis report in JSON format, strictly adhering to the NewsAnalysisReport Pydantic model schema. The output must be a valid JSON object only."
         )
     ]

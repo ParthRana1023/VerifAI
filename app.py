@@ -5,6 +5,7 @@ from tasks import create_news_analysis_tasks
 from setup import setup_crewai_config, setup_api_keys, check_ollama_status
 import time
 import traceback
+from models import NewsAnalysisReport
 
 def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None):
     # Setup CrewAI configuration
@@ -88,9 +89,17 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         status_text.text("Processing results...")
         
         # Handle the result more simply - just use the raw text output
-        if hasattr(result, 'raw'):
-            final_result = str(result.raw)
-        else:
+        # Attempt to parse the result into the Pydantic model
+        try:
+            # Ensure the result is a string before passing to model_validate_json
+            if hasattr(result, 'raw'):
+                json_string = result.raw
+            else:
+                json_string = str(result)
+
+            final_result = NewsAnalysisReport.model_validate_json(json_string)
+        except Exception as e:
+            st.warning(f"Could not parse report into structured format: {e}. Displaying raw text.")
             final_result = str(result)
         
         progress_bar.progress(100)
@@ -110,26 +119,95 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
             st.code(traceback.format_exc())
         return None
 
-def format_report_for_display(raw_report, user_query):
-    """Format the raw text report for better display"""
-    if not raw_report:
-        return "No report generated"
+def get_report_as_markdown(report):
+    """Convert report to markdown format for download"""
+    if not report:
+        return "# No Report Generated\n\nThe analysis did not produce a report."
     
-    # Add a header
-    formatted_report = f"# News Analysis Report: {user_query}\n\n"
-    formatted_report += f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    formatted_report += "---\n\n"
-    formatted_report += raw_report
+    # If report is just a string, return it as-is
+    if isinstance(report, str):
+        return f"# News Analysis Report\n\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{report}"
     
-    return formatted_report
+    try:
+        # Try to format structured report
+        markdown_content = []
+        markdown_content.append(f"# News Analysis Report: {getattr(report, 'query_summary', 'Unknown Topic')}")
+        markdown_content.append(f"\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        markdown_content.append("---\n")
+        
+        # Key Findings & Summary
+        markdown_content.append("## Key Findings & Summary\n")
+        markdown_content.append(f"{getattr(report, 'key_findings', 'No key findings available')}\n")
+        
+        # Related Articles
+        markdown_content.append("## Related Articles\n")
+        related_articles = getattr(report, 'related_articles', [])
+        if related_articles:
+            for article in related_articles:
+                if isinstance(article, dict):
+                    for title, url in article.items():
+                        markdown_content.append(f"- [{title}]({url})")
+        else:
+            markdown_content.append("No related articles found")
+        markdown_content.append("")
+        
+        # Related Words
+        markdown_content.append("## Related Words\n")
+        related_words = getattr(report, 'related_words', [])
+        if related_words:
+            markdown_content.append(", ".join(related_words))
+        else:
+            markdown_content.append("No related words found")
+        markdown_content.append("")
+        
+        # Topic Clusters
+        markdown_content.append("## Related Topic Clusters\n")
+        topic_clusters = getattr(report, 'topic_clusters', [])
+        if topic_clusters:
+            for cluster in topic_clusters:
+                if isinstance(cluster, dict):
+                    markdown_content.append(f"- **{cluster.get('topic', 'N/A')}** (Size: {cluster.get('size', 'N/A')})")
+                    related_narratives = cluster.get('related_narratives', [])
+                    if related_narratives:
+                        markdown_content.append("  - Related narratives: " + ", ".join(related_narratives))
+        else:
+            markdown_content.append("No topic clusters found")
+        markdown_content.append("")
+        
+        # Top Sources
+        markdown_content.append("## List of Top Sources\n")
+        top_sources = getattr(report, 'top_sources', [])
+        if top_sources:
+            markdown_content.append("| Domain | Factual Rating | Articles Count | Engagement |\n")
+            markdown_content.append("|--------|----------------|----------------|------------|\n")
+            for source in top_sources:
+                domain = getattr(source, 'domain', 'N/A')
+                factual = getattr(source, 'factual_rating', 'N/A')
+                articles = getattr(source, 'articles_count', 0)
+                engagement = getattr(source, 'engagement', 0)
+                markdown_content.append(f"| {domain} | {factual} | {articles} | {engagement} |\n")
+        else:
+            markdown_content.append("No source data available")
+        markdown_content.append("")
+        
+        # Add other sections as needed...
+        markdown_content.append("## Analysis Summary\n")
+        markdown_content.append("This report was generated using automated analysis tools.")
+        
+        return "\n".join(markdown_content)
+        
+    except Exception as e:
+        # Fallback to string representation
+        return f"# News Analysis Report\n\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{str(report)}\n\n---\n\n*Note: Error formatting structured report: {str(e)}*"
 
-def save_report_to_file(report_text, user_query):
+def save_report_to_file(report, user_query):
     """Save the report to a markdown file"""
     try:
         timestamp = time.strftime('%Y%m%d_%H%M%S')
         filename = f"news_analysis_report_{timestamp}.md"
         
-        formatted_report = format_report_for_display(report_text, user_query)
+        # Use the new get_report_as_markdown function
+        formatted_report = get_report_as_markdown(report)
         
         # For Streamlit, we'll provide a download button
         return formatted_report, filename
