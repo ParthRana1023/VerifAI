@@ -8,6 +8,133 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
     if len(agents) < 6:
         print(f"Expected 6 agents, got {len(agents)}")
         return None
+    
+    # Create the JSON schema template without f-string formatting issues
+    json_schema_template = '''
+    {
+        "query_summary": "Brief summary of the query",
+        "key_findings": "Main findings from the analysis",
+        "related_articles": [
+            {"title": "Article Title", "url": "https://example.com"}
+        ],
+        "related_words": ["keyword1", "keyword2", "keyword3"],
+        "topic_clusters": [
+            {
+                "topic": "Main Topic",
+                "size": 10,
+                "related_narratives": ["narrative1", "narrative2"]
+            }
+        ],
+        "top_sources": [
+            {
+                "domain": "example.com",
+                "factual_rating": "High",
+                "articles_count": 5,
+                "engagement": 1000
+            }
+        ],
+        "top_hashtags": [
+            {
+                "hashtag": "#example",
+                "engagement_rate": 15.5,
+                "reach": 50000,
+                "sentiment": "Positive"
+            }
+        ],
+        "similar_posts_time_series": [
+            {
+                "date": "2024-01-01",
+                "count": 25
+            }
+        ],
+        "fake_news_sites": [
+            {
+                "site": "fakename.com",
+                "shares": 100
+            }
+        ],
+        "content_analysis": {
+            "language_percentage": 85.0,
+            "coordination_percentage": 15.0,
+            "source_percentage": 75.0,
+            "bot_like_activity_percentage": 10.0
+        },
+        "propaganda_analysis": {
+            "overall_reliability_score": 75.0,
+            "propaganda_techniques": [
+                {
+                    "technique_name": "Appeal to emotion",
+                    "frequency": 3,
+                    "severity": 6.0,
+                    "example": "Example text",
+                    "explanation": "Explanation of technique"
+                }
+            ],
+            "misinformation_indicators": [
+                {
+                    "indicator_type": "Factual error",
+                    "confidence": 0.8,
+                    "correction": "Corrected information",
+                    "source_verification": ["source1.com", "source2.com"]
+                }
+            ],
+            "coordination_patterns": [
+                {
+                    "pattern_type": "Synchronized publishing",
+                    "strength": 0.7,
+                    "entities_involved": ["site1.com", "site2.com"],
+                    "timeline": "Within 2 hours"
+                }
+            ],
+            "bot_activity_metrics": {
+                "bot_likelihood_score": 0.3,
+                "account_creation_patterns": "Normal distribution",
+                "behavioral_indicators": ["Regular posting", "Human-like engagement"],
+                "network_analysis": "No suspicious clustering"
+            },
+            "fake_news_sites": [
+                {
+                    "domain": "fake-news.com",
+                    "shares": 500,
+                    "engagement": 2000,
+                    "known_false_stories": 3,
+                    "verification_failures": ["Failed fact-check 1"],
+                    "deceptive_practices": ["Misleading headlines"],
+                    "network_connections": ["connected-site.com"]
+                }
+            ],
+            "manipulation_timeline": [
+                {
+                    "timestamp": "2024-01-01T10:00:00",
+                    "event": "Initial post",
+                    "manipulation_type": "None detected"
+                }
+            ],
+            "narrative_fingerprint": {
+                "main_narrative": 0.8,
+                "counter_narrative": 0.2
+            },
+            "cross_verification_results": {
+                "verified_claims": 5,
+                "disputed_claims": 2,
+                "unverified_claims": 1
+            },
+            "recommended_verification_steps": [
+                "Check multiple sources",
+                "Verify with fact-checking sites",
+                "Look for original sources"
+            ]
+        },
+        "platform_facts": [
+            "Fact 1 about the platform",
+            "Fact 2 about the platform"
+        ],
+        "cross_source_facts": [
+            "Cross-verified fact 1",
+            "Cross-verified fact 2"
+        ]
+    }
+    '''
         
     return [
         Task(
@@ -114,12 +241,12 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             
             Instructions:
             1. Compile all findings from the previous tasks
-            2. Create a structured report with clear sections
+            2. Create a structured JSON report following the NewsAnalysisReport schema
             3. Include the most important findings at the top
             4. Add practical recommendations for readers
             5. Keep the language clear and accessible
             
-            Create a complete report in JSON format, strictly following the NewsAnalysisReport Pydantic model schema. Ensure all fields are populated accurately based on the analysis.
+            Create a complete report in JSON format, strictly following the NewsAnalysisReport Pydantic model schema.
             
             Context:
             - Query: {user_query}
@@ -127,64 +254,11 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             - Keywords: {keywords or 'None provided'}
             - Hashtags: {hashtags or 'None provided'}
             
-            Output MUST be a valid JSON object, with no additional text or formatting outside the JSON.
-            Example of expected JSON structure:
-            ```json
-            {
-                "executive_summary": "...",
-                "key_findings": [
-                    {
-                        "title": "...",
-                        "summary": "..."
-                    }
-                ],
-                "source_reliability": [
-                    {
-                        "source": "...",
-                        "reliability": "...",
-                        "bias": "..."
-                    }
-                ],
-                "social_media_metrics": {
-                    "top_hashtags": ["#..."],
-                    "engagement_level": "...",
-                    "overall_sentiment": "...",
-                    "trending_patterns": "..."
-                }
-                "time_series_data": [
-                    {
-                        "date": "YYYY-MM-DD",
-                        "value": 0
-                    }
-                ],
-                "propaganda_techniques": [
-                    {
-                        "technique": "...",
-                        "example": "..."
-                    }
-                ],
-                "misinformation_indicators": [
-                    {
-                        "indicator": "...",
-                        "description": "..."
-                    }
-                ],
-                "fake_news_sites": [
-                    {
-                        "site_name": "...",
-                        "reason": "..."
-                    }
-                ],
-                "credibility_score": [
-                    "score": 0,
-                    "explanation": "..."
-                ],
-                "recommendations": [
-                    "..."
-                ]
-            }
-            ```""",
+            Output MUST be a valid JSON object following this schema:
+            """ + json_schema_template + """
+            
+            Ensure all fields are populated with actual analysis data, not placeholder text.""",
             agent=agents[5],
-            expected_output="A comprehensive news analysis report in JSON format, strictly adhering to the NewsAnalysisReport Pydantic model schema. The output must be a valid JSON object only."
+            expected_output="A comprehensive news analysis report in JSON format, strictly adhering to the NewsAnalysisReport Pydantic model schema."
         )
     ]
