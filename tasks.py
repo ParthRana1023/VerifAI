@@ -9,244 +9,192 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
         print(f"Expected 6 agents, got {len(agents)}")
         return None
     
-    # Create the JSON schema template without f-string formatting issues
+    # Simplified JSON schema template for faster processing
     json_schema_template = '''
     {
-        "query_summary": "Brief summary of the query",
+        "query_summary": "Brief summary of the query analysis",
         "key_findings": "Main findings from the analysis",
         "related_articles": [
             {"title": "Article Title", "url": "https://example.com"}
         ],
         "related_words": ["keyword1", "keyword2", "keyword3"],
         "topic_clusters": [
-            {
-                "topic": "Main Topic",
-                "size": 10,
-                "related_narratives": ["narrative1", "narrative2"]
-            }
+            {"topic": "Main Topic", "size": 5, "related_narratives": ["narrative1"]}
         ],
         "top_sources": [
-            {
-                "domain": "example.com",
-                "factual_rating": "High",
-                "articles_count": 5,
-                "engagement": 1000
-            }
+            {"domain": "example.com", "factual_rating": "High", "articles_count": 3, "engagement": 500}
         ],
         "top_hashtags": [
-            {
-                "hashtag": "#example",
-                "engagement_rate": 15.5,
-                "reach": 50000,
-                "sentiment": "Positive"
-            }
+            {"hashtag": "#example", "engagement_rate": 10.0, "reach": 1000, "sentiment": "Neutral"}
         ],
         "similar_posts_time_series": [
-            {
-                "date": "2024-01-01",
-                "count": 25
-            }
+            {"date": "2024-01-01", "count": 5}
         ],
         "fake_news_sites": [
-            {
-                "site": "fakename.com",
-                "shares": 100
-            }
+            {"site": "unknown", "shares": 0}
         ],
         "content_analysis": {
-            "language_percentage": 85.0,
-            "coordination_percentage": 15.0,
-            "source_percentage": 75.0,
+            "language_percentage": 90.0,
+            "coordination_percentage": 5.0,
+            "source_percentage": 80.0,
             "bot_like_activity_percentage": 10.0
         },
         "propaganda_analysis": {
-            "overall_reliability_score": 75.0,
+            "overall_reliability_score": 70.0,
             "propaganda_techniques": [
-                {
-                    "technique_name": "Appeal to emotion",
-                    "frequency": 3,
-                    "severity": 6.0,
-                    "example": "Example text",
-                    "explanation": "Explanation of technique"
-                }
+                {"technique_name": "None detected", "frequency": 0, "severity": 0.0, "example": "N/A", "explanation": "No obvious propaganda techniques found"}
             ],
             "misinformation_indicators": [
-                {
-                    "indicator_type": "Factual error",
-                    "confidence": 0.8,
-                    "correction": "Corrected information",
-                    "source_verification": ["source1.com", "source2.com"]
-                }
+                {"indicator_type": "None detected", "confidence": 0.9, "correction": "N/A", "source_verification": ["N/A"]}
             ],
             "coordination_patterns": [
-                {
-                    "pattern_type": "Synchronized publishing",
-                    "strength": 0.7,
-                    "entities_involved": ["site1.com", "site2.com"],
-                    "timeline": "Within 2 hours"
-                }
+                {"pattern_type": "None detected", "strength": 0.1, "entities_involved": ["N/A"], "timeline": "N/A"}
             ],
             "bot_activity_metrics": {
-                "bot_likelihood_score": 0.3,
-                "account_creation_patterns": "Normal distribution",
-                "behavioral_indicators": ["Regular posting", "Human-like engagement"],
-                "network_analysis": "No suspicious clustering"
+                "bot_likelihood_score": 0.1,
+                "account_creation_patterns": "Normal",
+                "behavioral_indicators": ["Human-like behavior"],
+                "network_analysis": "No suspicious activity"
             },
             "fake_news_sites": [
-                {
-                    "domain": "fake-news.com",
-                    "shares": 500,
-                    "engagement": 2000,
-                    "known_false_stories": 3,
-                    "verification_failures": ["Failed fact-check 1"],
-                    "deceptive_practices": ["Misleading headlines"],
-                    "network_connections": ["connected-site.com"]
-                }
+                {"domain": "none", "shares": 0, "engagement": 0, "known_false_stories": 0, "verification_failures": [], "deceptive_practices": [], "network_connections": []}
             ],
             "manipulation_timeline": [
-                {
-                    "timestamp": "2024-01-01T10:00:00",
-                    "event": "Initial post",
-                    "manipulation_type": "None detected"
-                }
+                {"timestamp": "2024-01-01T00:00:00", "event": "No manipulation detected", "manipulation_type": "None"}
             ],
-            "narrative_fingerprint": {
-                "main_narrative": 0.8,
-                "counter_narrative": 0.2
-            },
-            "cross_verification_results": {
-                "verified_claims": 5,
-                "disputed_claims": 2,
-                "unverified_claims": 1
-            },
-            "recommended_verification_steps": [
-                "Check multiple sources",
-                "Verify with fact-checking sites",
-                "Look for original sources"
-            ]
+            "narrative_fingerprint": {"main_narrative": 1.0},
+            "cross_verification_results": {"verified_claims": 0, "disputed_claims": 0, "unverified_claims": 0},
+            "recommended_verification_steps": ["Check multiple reliable news sources", "Look for fact-checking websites"]
         },
-        "platform_facts": [
-            "Fact 1 about the platform",
-            "Fact 2 about the platform"
-        ],
-        "cross_source_facts": [
-            "Cross-verified fact 1",
-            "Cross-verified fact 2"
-        ]
+        "platform_facts": ["Basic factual information available"],
+        "cross_source_facts": ["Cross-referenced with available sources"]
     }
     '''
         
     return [
         Task(
-            description=f"""Search and collect news articles about: {user_query}
+            description=f"""QUICK SEARCH: Find 3-5 recent news articles about: {user_query}
             
-            Instructions:
-            1. Use search tools to find 5-7 recent news articles about the topic
-            2. Extract basic information: title, URL, source domain, publication date
-            3. Assess source reliability (High/Medium/Low)
-            4. Note any obvious bias or credibility issues
-            5. Provide a simple summary of what you found
+            TIME LIMIT: Complete this in under 2 minutes.
             
-            Output format:
-            - Article 1: [Title] from [Source] - [URL] - Reliability: [High/Medium/Low]
-            - Article 2: [Title] from [Source] - [URL] - Reliability: [High/Medium/Low]
-            - Summary: Brief overview of the articles found
+            SIMPLE INSTRUCTIONS:
+            1. Use ONLY search tools (do NOT scrape full websites)
+            2. Find exactly 3-5 article titles and URLs
+            3. Note the source domain for each
+            4. Rate each source as High/Medium/Low reliability based on common knowledge
+            5. Provide a 1-sentence summary
             
-            Keep it simple and factual.""",
+            REQUIRED OUTPUT FORMAT:
+            ARTICLES FOUND:
+            1. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
+            2. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
+            3. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
+            
+            SUMMARY: [One sentence about what these articles cover]
+            
+            DO NOT: Scrape content, analyze deeply, or spend more than 2 minutes.""",
             agent=agents[0],
-            expected_output="List of 5-7 news articles with titles, sources, URLs, and basic reliability assessment, plus a brief summary."
+            expected_output="List of 3-5 articles with titles, sources, URLs, and reliability ratings, plus a one-sentence summary."
         ),
         Task(
-            description=f"""Analyze the content of the news articles found for: {user_query}
+            description=f"""QUICK ANALYSIS: Analyze themes from article titles found for: {user_query}
             
-            Instructions:
-            1. Review the articles found by the Web Crawler
-            2. Extract the main themes and key points
-            3. Identify 10-15 important keywords related to the topic
-            4. Note any conflicting information between sources
-            5. Assess the overall factual quality
+            TIME LIMIT: Complete this in under 2 minutes.
             
-            Output format:
-            Key Findings: [Main points from the articles]
-            Important Keywords: [List of relevant words]
-            Conflicting Information: [Any contradictions found]
-            Factual Assessment: [Overall quality assessment]
+            SIMPLE INSTRUCTIONS:
+            1. Review ONLY the article titles from the previous task
+            2. Identify 5-7 key themes/topics
+            3. List 8-10 important keywords
+            4. Note any obvious conflicts in headlines
+            5. Give a basic quality assessment
             
-            Be clear and concise.""",
+            REQUIRED OUTPUT FORMAT:
+            THEMES: [theme1, theme2, theme3, theme4, theme5]
+            KEYWORDS: [word1, word2, word3, word4, word5, word6, word7, word8]
+            CONFLICTS: [Any obvious contradictions in headlines, or "None obvious"]
+            QUALITY: [High/Medium/Low with brief reason]
+            
+            DO NOT: Scrape full articles, conduct deep research, or exceed time limit.""",
             agent=agents[1],
-            expected_output="Content analysis with key findings, important keywords, conflicting information, and factual assessment."
+            expected_output="Quick thematic analysis with themes, keywords, conflicts, and quality assessment from headlines only."
         ),
         Task(
-            description=f"""Research social media activity around: {user_query}
+            description=f"""QUICK SOCIAL SEARCH: Find hashtags and sentiment for: {user_query}
             
-            Instructions:
-            1. Search for mentions of this topic on social platforms
-            2. Find 3-5 relevant hashtags being used
-            3. Assess general engagement levels (High/Medium/Low)
-            4. Note the overall sentiment (Positive/Negative/Neutral/Mixed)
-            5. Look for any viral or trending patterns
+            TIME LIMIT: Complete this in under 90 seconds.
             
-            Output format:
-            Top Hashtags: #hashtag1, #hashtag2, #hashtag3
-            Engagement Level: [High/Medium/Low]
-            Overall Sentiment: [Positive/Negative/Neutral/Mixed]
-            Trending Patterns: [Any notable patterns]
+            SIMPLE INSTRUCTIONS:
+            1. Search for 3-5 relevant hashtags about this topic
+            2. Assess general engagement as High/Medium/Low
+            3. Determine overall sentiment as Positive/Negative/Neutral/Mixed
+            4. Note if topic is trending or not
             
-            Keep observations factual and simple.""",
+            REQUIRED OUTPUT FORMAT:
+            HASHTAGS: #hashtag1, #hashtag2, #hashtag3
+            ENGAGEMENT: [High/Medium/Low]
+            SENTIMENT: [Positive/Negative/Neutral/Mixed]
+            TRENDING: [Yes/No]
+            
+            DO NOT: Deep dive into social media analysis or exceed time limit.""",
             agent=agents[2],
-            expected_output="Social media analysis with top hashtags, engagement levels, sentiment, and trending patterns."
+            expected_output="Basic social media metrics with hashtags, engagement level, sentiment, and trending status."
         ),
         Task(
-            description=f"""Organize the collected data for easy understanding of: {user_query}
+            description=f"""ORGANIZE DATA: Structure all findings for: {user_query}
             
-            Instructions:
-            1. Group the findings into main topic categories
-            2. Create a simple timeline if dates are available
-            3. Organize sources by reliability level
-            4. Prepare a summary of data patterns found
+            TIME LIMIT: Complete this in under 1 minute.
             
-            Output format:
-            Topic Categories: [Main themes grouped]
-            Timeline: [Key dates and events if available]
-            Source Reliability: High: [list], Medium: [list], Low: [list]
-            Data Patterns: [Summary of what the data shows]
+            SIMPLE INSTRUCTIONS:
+            1. Group articles by reliability (High/Medium/Low)
+            2. Organize themes into main categories
+            3. Create simple data structure
+            4. Summarize patterns found
             
-            Focus on clear organization.""",
+            REQUIRED OUTPUT FORMAT:
+            HIGH RELIABILITY: [list of high-reliability sources]
+            MEDIUM RELIABILITY: [list of medium-reliability sources]
+            LOW RELIABILITY: [list of low-reliability sources]
+            MAIN CATEGORIES: [grouped themes]
+            PATTERNS: [brief summary of what data shows]
+            
+            DO NOT: Conduct new research or spend more than 1 minute.""",
             agent=agents[3],
-            expected_output="Organized data with topic categories, timeline, source reliability groupings, and pattern summary."
+            expected_output="Organized data with reliability groupings, theme categories, and pattern summary."
         ),
         Task(
-            description=f"""Examine the content for propaganda techniques and misinformation about: {user_query}
+            description=f"""BASIC RELIABILITY CHECK: Assess information quality for: {user_query}
             
-            Instructions:
-            1. Look for obvious propaganda techniques (emotional appeals, loaded language, etc.)
-            2. Check for clear factual errors or misleading claims
-            3. Note any suspicious coordination between sources
-            4. Assess overall credibility on a scale of 1-10
-            5. Suggest basic verification steps
+            TIME LIMIT: Complete this in under 1 minute.
             
-            Output format:
-            Propaganda Techniques Found: [List any obvious techniques]
-            Factual Issues: [Any clear errors or misleading claims]
-            Source Coordination: [Any suspicious patterns]
-            Credibility Score: [1-10 with brief explanation]
-            Verification Steps: [How readers can verify the information]
+            SIMPLE INSTRUCTIONS:
+            1. Rate overall reliability 1-10 based on sources found
+            2. Note any obvious red flags (if any)
+            3. Suggest 2-3 basic verification steps
+            4. Keep assessment simple and fast
             
-            Be careful to only flag obvious issues.""",
+            REQUIRED OUTPUT FORMAT:
+            RELIABILITY SCORE: [1-10]/10
+            RED FLAGS: [Any obvious issues, or "None obvious"]
+            VERIFICATION STEPS: 
+            - Step 1
+            - Step 2
+            - Step 3
+            
+            DO NOT: Conduct deep verification research or exceed time limit.""",
             agent=agents[4],
-            expected_output="Analysis of propaganda techniques, factual issues, coordination patterns, credibility score, and verification recommendations."
+            expected_output="Basic reliability assessment with score, red flags, and verification steps."
         ),
         Task(
-            description=f"""Create a comprehensive report combining all analysis of: {user_query}
+            description=f"""COMPILE REPORT: Create JSON report for: {user_query}
             
-            Instructions:
-            1. Compile all findings from the previous tasks
-            2. Create a structured JSON report following the NewsAnalysisReport schema
-            3. Include the most important findings at the top
-            4. Add practical recommendations for readers
-            5. Keep the language clear and accessible
+            TIME LIMIT: Complete this in under 90 seconds.
             
-            Create a complete report in JSON format, strictly following the NewsAnalysisReport Pydantic model schema.
+            INSTRUCTIONS:
+            1. Take all information from previous tasks
+            2. Fill the JSON template with actual data found
+            3. Use "Unknown" or "N/A" for missing information
+            4. Keep data realistic based on what was actually found
+            5. Ensure valid JSON format
             
             Context:
             - Query: {user_query}
@@ -254,11 +202,13 @@ def create_news_analysis_tasks(agents, user_query, urls=None, hashtags=None, key
             - Keywords: {keywords or 'None provided'}
             - Hashtags: {hashtags or 'None provided'}
             
-            Output MUST be a valid JSON object following this schema:
+            OUTPUT MUST BE VALID JSON following this template:
             """ + json_schema_template + """
             
-            Ensure all fields are populated with actual analysis data, not placeholder text.""",
+            CRITICAL: Replace template values with ACTUAL findings from previous tasks.
+            Use simple, realistic values. Do not make up complex analysis.
+            Focus on speed and accuracy over comprehensiveness.""",
             agent=agents[5],
-            expected_output="A comprehensive news analysis report in JSON format, strictly adhering to the NewsAnalysisReport Pydantic model schema."
+            expected_output="Complete JSON report following the NewsAnalysisReport schema with actual findings from the analysis."
         )
     ]

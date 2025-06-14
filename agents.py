@@ -26,7 +26,7 @@ def create_news_analysis_agents():
         return None
 
     try:
-        # Initialize tools with error handling
+        # Initialize tools with error handling and timeout configurations
         serper_tool = SerperDevTool()
         scrape_tool = ScrapeWebsiteTool()
         search_tool = WebsiteSearchTool()
@@ -34,85 +34,73 @@ def create_news_analysis_agents():
         return [
             Agent(
                 role="Web Crawler",
-                goal="Extract news data for the query",
-                backstory="An expert web crawler specialized in news sites, capable of identifying reliable sources and extracting relevant articles efficiently.",
-                tools=[scrape_tool, search_tool, serper_tool],
+                goal="Quickly find 3-5 recent news articles about the query using search tools only",
+                backstory="An efficient web crawler that focuses on finding the most relevant recent articles quickly without deep scraping.",
+                tools=[serper_tool, scrape_tool, search_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
-                # Disable memory and function calling to avoid compatibility issues
                 memory=False,
-                max_iter=2,  # Reduced to prevent timeout
-                max_execution_time=180,  # 3 minutes
-                # Disable step callback which can cause issues
-                step_callback=None
+                step_callback=None,
+                system_message="Focus only on finding article titles, URLs, and sources. Do not analyze content deeply. Limit to 3-5 articles maximum."
             ),
             Agent(
                 role="News Content Analyst",
-                goal="Analyze news content in depth",
-                backstory="A seasoned journalist with expertise in fact-checking, source reliability assessment, and content analysis who can identify credible sources, biases, and trends in news articles.",
-                tools=[scrape_tool, search_tool, serper_tool],
+                goal="Quickly analyze the main themes from article titles and summaries only",
+                backstory="A fast content analyst who works with article titles, headlines, and brief summaries to extract key themes without deep content analysis.",
+                tools=[serper_tool, scrape_tool, search_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=2,
-                max_execution_time=180,
-                step_callback=None
+                step_callback=None,
+                system_message="Analyze only headlines and brief summaries. Do not scrape full article content. Focus on identifying 5-7 key themes quickly."
             ),
             Agent(
                 role="Social Media Tracking Specialist", 
-                goal="Track news spread on social media",
-                backstory="A social media expert who specializes in tracking how news spreads across platforms, identifying trending hashtags, measuring engagement, and analyzing sentiment related to news topics.",
-                tools=[search_tool, serper_tool],
+                goal="Quickly identify trending hashtags and basic sentiment using search only",
+                backstory="A social media expert who uses search tools to quickly identify popular hashtags and general sentiment without deep analysis.",
+                tools=[serper_tool, scrape_tool, search_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=2,
-                max_execution_time=180,
-                step_callback=None
+                step_callback=None,
+                system_message="Find 3-5 popular hashtags and general sentiment quickly. Do not perform deep social media analysis."
             ),
             Agent(
-                role="News Data Visualization Expert",
-                goal="Create data visualizations from news analysis", 
-                backstory="A data visualization specialist who transforms news analysis data into meaningful visual representations including topic clusters, wordclouds, time series graphs, and reliability charts.",
-                tools=[serper_tool],
+                role="Data Organizer",
+                goal="Organize the collected information into structured format", 
+                backstory="A data organization specialist who structures information efficiently without additional research.",
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=2,
-                max_execution_time=180,
-                step_callback=None
+                step_callback=None,
+                system_message="Only organize and structure data provided by other agents. Do not conduct additional research."
             ),
             Agent(
-                role="Propaganda & Misinformation Analyst",
-                goal="Identify and quantify propaganda, misinformation, and coordinated inauthentic behavior in news content",
-                backstory="""An expert with advanced training in computational propaganda detection, 
-                           misinformation analysis, and network forensics. Specialized in identifying 
-                           manipulation techniques, assessing credibility signals, detecting narrative 
-                           manipulation, and tracing the spread of false information across media ecosystems.""",
-                tools=[scrape_tool, serper_tool, search_tool],
+                role="Basic Reliability Assessor",
+                goal="Provide basic reliability assessment of sources without deep investigation",
+                backstory="A reliability assessor who provides quick, basic credibility checks based on well-known source reputations.",
+                tools=[serper_tool, scrape_tool, search_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=2,
-                max_execution_time=180,
-                step_callback=None
+                step_callback=None,
+                system_message="Provide basic reliability scores based on common knowledge of source credibility. Do not conduct deep verification research."
             ),
             Agent(
-                role="News Report Generator",
-                goal="Compile findings into a comprehensive news analysis report",
-                backstory="A professional report writer specialized in organizing complex news analysis data into structured, insightful, and actionable reports with clear visualizations and fact comparisons.",
+                role="Report Compiler",
+                goal="Compile all findings into the required JSON report format",
+                backstory="A report writer who efficiently compiles analysis into structured JSON format without additional research.",
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                max_iter=2,
-                max_execution_time=180,
-                step_callback=None
+                step_callback=None,
+                system_message="Compile provided information into the required JSON schema. Do not conduct additional research or analysis."
             )
         ]
     except Exception as e:
