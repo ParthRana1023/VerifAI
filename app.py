@@ -2,20 +2,23 @@ from crewai import Crew, Process
 import streamlit as st
 from agents import create_news_analysis_agents
 from tasks import create_news_analysis_tasks
-from setup import setup_crewai_config, setup_api_keys, check_ollama_status
+from setup import setup_crewai_config, setup_api_keys, check_gemini_status
 import time
 import traceback
+import json
 from models import NewsAnalysisReport
+import os
+
+os.environ["STREAMLIT_SERVER_ENABLE_FILE_WATCHER"] = "false"
 
 def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None):
     # Setup CrewAI configuration
     setup_crewai_config()
-    
-    # Check Ollama first
-    ollama_ok, ollama_msg = check_ollama_status()
-    if not ollama_ok:
-        st.error(f"Ollama Error: {ollama_msg}")
-        return None
+
+    # Check Gemini API key
+    gemini_ok, gemini_msg = check_gemini_status()
+    if not gemini_ok:
+        st.error(f"Gemini API Key Error: {gemini_msg}")
     
     agents = create_news_analysis_agents()
     if not agents:
@@ -37,7 +40,7 @@ def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=Non
             # Reduced timeout - optimized tasks should complete faster
             max_execution_time=600,  # 10 minutes max (reduced from 15)
             # Disable planning which can cause issues with Ollama
-            planning=False,
+            # planning=False,
             # Disable embedder which can cause issues
             embedder=None
         )
@@ -106,12 +109,10 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
                 **Common timeout causes:**
                 - Complex or very specific queries
                 - Network connectivity issues
-                - Ollama server overload
                 - Too many web scraping requests
                 
                 **Try these solutions:**
                 - Use simpler, more general queries
-                - Restart Ollama server
                 - Check internet connection
                 - Try again in a few minutes
                 """)
@@ -120,29 +121,54 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         progress_bar.progress(80)
         status_text.text("Processing and formatting results...")
         
-        # Handle the result with improved error handling
+        # Handle the result with improved error handling and JSON extraction
         try:
-            # Check if result has the expected structure
+            # Get the raw result
             if hasattr(result, 'raw'):
-                json_string = result.raw
+                raw_result = result.raw
             elif hasattr(result, 'json'):
-                json_string = result.json
+                raw_result = result.json
             else:
-                json_string = str(result)
+                raw_result = str(result)
 
-            # Try to parse as JSON first
+            # Extract JSON from potentially markdown-wrapped response
+            json_string = extract_json_from_response(raw_result)
+            
+            if not json_string:
+                raise ValueError("No JSON content found in response")
+            
+            # Clean the JSON string
+            json_string = clean_json_string(json_string)
+            
+            # Debug: Show what we're trying to parse
+            with st.expander("Debug: Raw JSON being parsed"):
+                st.code(json_string[:500] + "..." if len(json_string) > 500 else json_string)
+            
+            # Try to parse as JSON
             try:
-                import json
-                # Attempt to parse as JSON to validate
                 parsed_json = json.loads(json_string)
                 final_result = NewsAnalysisReport.model_validate(parsed_json)
-            except json.JSONDecodeError:
-                # If not valid JSON, try model_validate_json
-                final_result = NewsAnalysisReport.model_validate_json(json_string)
+                st.success("✅ Successfully parsed structured report!")
+                
+            except json.JSONDecodeError as je:
+                st.warning(f"JSON parsing failed: {je}")
+                st.info("Attempting alternative parsing methods...")
+                
+                # Try using model_validate_json directly
+                try:
+                    final_result = NewsAnalysisReport.model_validate_json(json_string)
+                    st.success("✅ Successfully parsed with alternative method!")
+                except Exception as e2:
+                    st.warning(f"Alternative parsing also failed: {e2}")
+                    raise e2
             
         except Exception as e:
             st.warning(f"Could not parse report into structured format: {e}")
-            st.info("Displaying raw analysis results instead:")
+            st.info("Creating fallback report from raw analysis results...")
+            
+            # Show the raw result for debugging
+            with st.expander("Debug: Raw Result"):
+                st.text(str(result)[:1000] + "..." if len(str(result)) > 1000 else str(result))
             
             # Create a simple fallback report structure
             final_result = {
@@ -150,8 +176,37 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
                 'key_findings': str(result)[:500] + "..." if len(str(result)) > 500 else str(result),
                 'related_articles': [],
                 'related_words': user_query.split(),
-                'topic_clusters': [{'topic': 'General Analysis', 'size': 1, 'related_narratives': ['N/A']}],
-                'analysis_note': 'Raw output due to parsing issues'
+                'topic_clusters': [{'topic': 'General Analysis', 'size': 1, 'related_narratives': ['Raw analysis output']}],
+                'top_sources': [],
+                'top_hashtags': [],
+                'similar_posts_time_series': [],
+                'fake_news_sites': [],
+                'content_analysis': {
+                    'language_percentage': 0.0,
+                    'coordination_percentage': 0.0,
+                    'source_percentage': 0.0,
+                    'bot_like_activity_percentage': 0.0
+                },
+                'propaganda_analysis': {
+                    'overall_reliability_score': 50.0,
+                    'propaganda_techniques': [],
+                    'misinformation_indicators': [],
+                    'coordination_patterns': [],
+                    'bot_activity_metrics': {
+                        'bot_likelihood_score': 0.0,
+                        'account_creation_patterns': 'Unknown',
+                        'behavioral_indicators': [],
+                        'network_analysis': 'Analysis incomplete'
+                    },
+                    'fake_news_sites': [],
+                    'manipulation_timeline': [],
+                    'narrative_fingerprint': {},
+                    'cross_verification_results': {},
+                    'recommended_verification_steps': ['Check multiple sources', 'Verify with fact-checkers']
+                },
+                'platform_facts': ['Analysis incomplete due to parsing issues'],
+                'cross_source_facts': ['Please refer to raw output above'],
+                'analysis_note': f'Raw output due to parsing issues: {str(e)}'
             }
         
         progress_bar.progress(100)
@@ -172,13 +227,16 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
             st.info("💡 **Timeout occurred.** Try these solutions:")
             st.write("- Use a simpler, more specific query")
             st.write("- Check your internet connection")
-            st.write("- Restart the Ollama server")
             st.write("- Try again in a few minutes")
         elif "connection" in str(e).lower():
             st.info("💡 **Connection issues detected.** Check:")
             st.write("- Internet connectivity")
-            st.write("- Ollama server status")
             st.write("- API key configurations")
+        elif "json" in str(e).lower():
+            st.info("💡 **JSON parsing issues detected.** This usually means:")
+            st.write("- The AI model returned malformed JSON")
+            st.write("- Try running the analysis again")
+            st.write("- Consider simplifying your query")
         
         # Print detailed error info for debugging
         with st.expander("Detailed Error Information (for debugging)"):
@@ -293,29 +351,3 @@ def save_report_to_file(report, user_query):
     except Exception as e:
         st.error(f"Failed to prepare report for download: {e}")
         return None, None
-
-def main():
-    setup_crewai_config()
-    
-    if not setup_api_keys():
-        print("Invalid API keys. Exiting.")
-        return
-    
-    user_query = input("Enter news topic to analyze: ")
-    urls = input("Enter news URLs (comma-separated, optional): ").split(',') if input("Include specific news URLs? (y/n): ").lower() == 'y' else None
-    hashtags = input("Enter hashtags to track (comma-separated, optional): ").split(',') if input("Track specific hashtags? (y/n): ").lower() == 'y' else None
-    keywords = input("Enter additional keywords (comma-separated, optional): ").split(',') if input("Include additional keywords? (y/n): ").lower() == 'y' else None
-    
-    report = run_news_analysis(user_query, urls, hashtags, keywords)
-    if report:
-        formatted_report, filename = save_report_to_file(report, user_query)
-        if formatted_report:
-            print(f"Report generated successfully!")
-            print(f"Report content:\n{formatted_report}")
-        else:
-            print("Failed to format report")
-    else:
-        print("Failed to generate report")
-
-if __name__ == "__main__":
-    main()

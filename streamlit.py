@@ -5,106 +5,29 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import logging
-from app import run_news_analysis, setup_api_keys
+from app import run_news_analysis, get_report_as_markdown
 from reddit import scrape_reddit_data, extract_keywords, is_reddit_url
+import traceback
+from setup import setup_crewai_config, setup_api_keys, check_gemini_status
+
+st.set_page_config(
+    page_title="VerifAI",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def check_ollama_connection():
-    """Check if Ollama is running and accessible"""
-    import requests
-    try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
-        if response.status_code == 200:
-            return True, "Ollama is running"
-        else:
-            return False, f"Ollama returned status code: {response.status_code}"
-    except requests.exceptions.ConnectionError:
-        return False, "Cannot connect to Ollama. Make sure Ollama is running on localhost:11434"
-    except Exception as e:
-        return False, f"Error checking Ollama: {str(e)}"
+def check_gemini_connection():
+    """Check if Gemini API key is set"""
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_api_key:
+        return False, "GEMINI_API_KEY not found. Please set it in your environment variables or .env file."
+    return True, "Gemini API key is set."
 
-def get_report_as_markdown(report):
-    """Convert report to markdown format for download"""
-    if not report:
-        return "# No Report Generated\n\nThe analysis did not produce a report."
-    
-    # If report is just a string, return it as-is
-    if isinstance(report, str):
-        return f"# News Analysis Report\n\nGenerated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{report}"
-    
-    try:
-        # Try to format structured report
-        markdown_content = []
-        markdown_content.append(f"# News Analysis Report: {getattr(report, 'query_summary', 'Unknown Topic')}")
-        markdown_content.append(f"\nGenerated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        markdown_content.append("---\n")
-        
-        # Key Findings & Summary
-        markdown_content.append("## Key Findings & Summary\n")
-        markdown_content.append(f"{getattr(report, 'key_findings', 'No key findings available')}\n")
-        
-        # Related Articles
-        markdown_content.append("## Related Articles\n")
-        related_articles = getattr(report, 'related_articles', [])
-        if related_articles:
-            for article in related_articles:
-                if isinstance(article, dict):
-                    for title, url in article.items():
-                        markdown_content.append(f"- [{title}]({url})")
-        else:
-            markdown_content.append("No related articles found")
-        markdown_content.append("")
-        
-        # Related Words
-        markdown_content.append("## Related Words\n")
-        related_words = getattr(report, 'related_words', [])
-        if related_words:
-            markdown_content.append(", ".join(related_words))
-        else:
-            markdown_content.append("No related words found")
-        markdown_content.append("")
-        
-        # Topic Clusters
-        markdown_content.append("## Related Topic Clusters\n")
-        topic_clusters = getattr(report, 'topic_clusters', [])
-        if topic_clusters:
-            for cluster in topic_clusters:
-                if isinstance(cluster, dict):
-                    markdown_content.append(f"- **{cluster.get('topic', 'N/A')}** (Size: {cluster.get('size', 'N/A')})")
-                    related_narratives = cluster.get('related_narratives', [])
-                    if related_narratives:
-                        markdown_content.append("  - Related narratives: " + ", ".join(related_narratives))
-        else:
-            markdown_content.append("No topic clusters found")
-        markdown_content.append("")
-        
-        # Top Sources
-        markdown_content.append("## List of Top Sources\n")
-        top_sources = getattr(report, 'top_sources', [])
-        if top_sources:
-            markdown_content.append("| Domain | Factual Rating | Articles Count | Engagement |")
-            markdown_content.append("|--------|----------------|----------------|------------|")
-            for source in top_sources:
-                domain = getattr(source, 'domain', 'N/A')
-                factual = getattr(source, 'factual_rating', 'N/A')
-                articles = getattr(source, 'articles_count', 0)
-                engagement = getattr(source, 'engagement', 0)
-                markdown_content.append(f"| {domain} | {factual} | {articles} | {engagement} |")
-        else:
-            markdown_content.append("No source data available")
-        markdown_content.append("")
-        
-        # Add other sections as needed...
-        markdown_content.append("## Analysis Summary\n")
-        markdown_content.append("This report was generated using automated analysis tools.")
-        
-        return "\n".join(markdown_content)
-        
-    except Exception as e:
-        # Fallback to string representation
-        return f"# News Analysis Report\n\nGenerated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{str(report)}\n\n---\n\n*Note: Error formatting structured report: {str(e)}*"
+
 
 def display_report(report):
     """Display the news analysis report in the Streamlit interface"""
@@ -400,28 +323,6 @@ def analyze_reddit_post(url):
         return None
     
     # Convert keywords to list
-
-def analyze_reddit_post(url):
-    """
-    Analyze a Reddit post and return the news analysis report
-    """
-    # Scrape Reddit data
-    with st.spinner("Scraping Reddit post..."):
-        reddit_data = scrape_reddit_data(url)
-    
-    if "error" in reddit_data:
-        st.error(f"Error: {reddit_data['error']}")
-        return None
-    
-    # Extract keywords
-    with st.spinner("Extracting keywords..."):
-        keywords = extract_keywords(reddit_data)
-    
-    if not keywords:
-        st.error("No keywords extracted from the post.")
-        return None
-    
-    # Convert keywords to list
     keyword_list = [kw['text'] for kw in keywords]
     
     # Display extracted information
@@ -469,27 +370,31 @@ def manual_analysis():
     
     with col1:
         user_query = st.text_input(
-            "News Topic to Analyze:",
-            placeholder="Enter the news topic you want to analyze..."
-        )
+    "News Topic to Analyze:",
+    placeholder="Enter the news topic you want to analyze...",
+    key="user_query_1"
+)
         
         keywords_input = st.text_area(
             "Additional Keywords (one per line):",
-            placeholder="keyword1\nkeyword2\nkeyword3"
+            placeholder="keyword1\nkeyword2\nkeyword3",
+            key="keywords_input_1"
         )
         
     with col2:
         urls_input = st.text_area(
             "Specific URLs to analyze (one per line):",
-            placeholder="https://example.com/article1\nhttps://example.com/article2"
+            placeholder="https://example.com/article1\nhttps://example.com/article2",
+            key="urls_input_1"
         )
         
         hashtags_input = st.text_input(
             "Hashtags to track (comma-separated):",
-            placeholder="#news, #breaking, #analysis"
+            placeholder="#news, #breaking, #analysis",
+            key="hashtags_input_1"
         )
     
-    if st.button("Run Manual Analysis", type="primary"):
+    if st.button("Run Manual Analysis", type="primary", key="run_manual_analysis_1"):
         if not user_query.strip():
             st.error("Please enter a news topic to analyze.")
             return None
@@ -513,66 +418,62 @@ def manual_analysis():
     return None
 
 def main():
-    st.set_page_config(
-        page_title="VerifAI",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    st.title("VerifAI: News Analysis Tool")
-    
-    # Sidebar
-    st.sidebar.header("About")
-    st.sidebar.markdown("""
-    This tool analyzes news content to extract insights, detect propaganda techniques, 
-    and identify misinformation patterns. You can:
-    
-    - Analyze Reddit posts automatically
-    - Perform manual news analysis
-    - Generate comprehensive reports
-    """)
-    
-    # Check Ollama status
-    with st.sidebar.expander("System Status"):
-        ollama_status, ollama_msg = check_ollama_connection()
-        if ollama_status:
-            st.success(f"✅ {ollama_msg}")
-        else:
-            st.error(f"❌ {ollama_msg}")
-            st.info("Make sure Ollama is running with the Mistral model")
-    
-    # API key setup in the sidebar
-    with st.sidebar.expander("Configure API Keys"):
-        current_key = os.environ.get("SERPER_API_KEY", "")
-        serper_api_key = st.text_input(
-            "Serper API Key", 
-            value=current_key if current_key != "dummy-key-for-ollama" else "",
-            type="password",
-            help="Required for web search functionality"
-        )
+    try:
+        st.title("VerifAI: News Analysis Tool")
         
-        if st.button("Save API Keys"):
-            if serper_api_key.strip():
-                os.environ["SERPER_API_KEY"] = serper_api_key.strip()
-                st.success("API key saved!")
-            else:
-                st.error("Please enter a valid Serper API key")
-    
-    # Main interface tabs
-    tab1, tab2 = st.tabs(["Reddit Analysis", "Manual Analysis"])
-    
-    with tab1:
+        # Sidebar
+        st.sidebar.header("About")
+        st.sidebar.markdown(
+            """
+            This tool analyzes news content to extract insights, detect propaganda techniques,
+            and identify misinformation patterns. You can analyze Reddit posts to generate
+            comprehensive reports.
+            """
+        )
+        st.sidebar.expander("Configure API Keys").markdown(
+            """
+            To use this tool, you need to configure your Gemini API key.
+            You can get one at [Google AI Studio](https://aistudio.google.com/app/apikey).
+            """
+        )
+        # Check Gemini status
+        gemini_status, gemini_msg = check_gemini_connection()
+        if gemini_status:
+            st.success(f"✅ {gemini_msg}")
+        else:
+            st.error(f"❌ {gemini_msg}")
+            st.info("Please set your GEMINI_API_KEY in your environment variables or .env file.")
+        
+        # API key setup in the sidebar
+        with st.sidebar.expander("Configure API Keys"):
+            current_key = os.environ.get("SERPER_API_KEY", "")
+            serper_api_key = st.text_input(
+                "Serper API Key", 
+                value=current_key if current_key != "dummy-key-for-ollama" else "",
+                type="password",
+                help="Required for web search functionality",
+                key="serper_api_key_1"
+            )
+            
+            if st.button("Save API Keys", key="save_api_keys_1"):
+                if serper_api_key.strip():
+                    os.environ["SERPER_API_KEY"] = serper_api_key.strip()
+                    st.success("API key saved!")
+                else:
+                    st.error("Please enter a valid Serper API key")
+        
+        # Reddit Analysis interface
         st.header("Reddit Post Analysis")
         st.markdown("Analyze a Reddit post to understand news patterns and credibility.")
         
         url = st.text_input(
             "Enter a Reddit URL:", 
             placeholder="https://www.reddit.com/r/news/comments/...",
-            help="Paste a link to a Reddit post you want to analyze"
+            help="Paste a link to a Reddit post you want to analyze",
+            key="url_1"
         )
         
-        if st.button("Analyze Reddit Post", type="primary"):
+        if st.button("Analyze Reddit Post", type="primary", key="analyze_reddit_post_1"):
             if not url:
                 st.error("Please enter a Reddit URL.")
             elif not is_reddit_url(url):
@@ -605,28 +506,10 @@ def main():
                 except Exception as e:
                     st.error(f"Analysis failed: {str(e)}")
                     st.error("If this error persists, check your API keys and Ollama setup.")
-    
-    with tab2:
-        st.header("Manual News Analysis")
-        st.markdown("Perform custom news analysis by specifying topics, keywords, and sources.")
-        
-        if not setup_api_keys():
-            st.warning("⚠️ API keys not configured. Please set your Serper API key in the sidebar.")
-        
-        report = manual_analysis()
-        
-        if report:
-            display_report(report)
-            formatted_report, filename = save_report_to_file(report, user_query)
-            if formatted_report:
-                st.download_button(
-                    label="Download Report as Markdown",
-                    data=formatted_report,
-                    file_name=filename,
-                    mime="text/markdown",
-                )
-        else:
-            st.error("Failed to generate report")
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+        st.code(traceback.format_exc())
+        st.stop()
 
 if __name__ == "__main__":
     main()

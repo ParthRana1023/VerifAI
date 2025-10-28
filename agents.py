@@ -1,19 +1,17 @@
 from crewai import Agent
 from crewai_tools import SerperDevTool, ScrapeWebsiteTool, WebsiteSearchTool
-from setup import setup_crewai_config, get_llm, check_ollama_status
+from setup import setup_crewai_config, check_gemini_status, get_llm
 import streamlit as st
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 def create_news_analysis_agents():
     # Setup CrewAI configuration first
     setup_crewai_config()
     
-    # Check Ollama status
-    ollama_ok, ollama_msg = check_ollama_status()
-    if not ollama_ok:
-        if 'st' in globals():
-            st.error(f"Ollama issue: {ollama_msg}")
-        else:
-            print(f"Ollama issue: {ollama_msg}")
+    # Check Gemini status
+    gemini_ok, gemini_msg = check_gemini_status()
+    if not gemini_ok:
+        st.error(f"Gemini issue: {gemini_msg}")
         return None
     
     # Initialize LLM with proper error handling
@@ -108,4 +106,19 @@ def create_news_analysis_agents():
             st.error(f"Failed to create agents: {e}")
         else:
             print(f"Failed to create agents: {e}")
+        return None
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def fetch_news_api(query):
+    try:
+        response = requests.get(API_ENDPOINT, 
+            params={'q': query},
+            headers={'Authorization': f'Bearer {os.getenv("API_KEY")}'},
+            timeout=15
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logging.error(f"API Error: {str(e)}", exc_info=True)
         return None
