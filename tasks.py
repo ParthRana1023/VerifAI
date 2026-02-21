@@ -2,159 +2,113 @@ import json
 from crewai import Task
 from models import NewsAnalysisReport
 from typing import List
-from streamlit.runtime.caching import cache_data
+
 
 def model_to_json_template(model_class: type) -> str:
-    """
-    Generates a JSON schema template from a Pydantic model.
-    """
-    return json.dumps(model_class.model_json_schema(), indent=4)
+    """Generates a JSON schema template from a Pydantic model."""
+    return json.dumps(model_class.model_json_schema(), indent=2)
 
-def create_news_analysis_tasks(agents: List[str], user_query: str,
+
+def create_news_analysis_tasks(agents: List, user_query: str,
                                urls: List[str] = None,
                                hashtags: List[str] = None,
                                keywords: List[str] = None) -> List[Task]:
-    if not agents or len(agents) < 6:
-        print(f"Expected 6 agents, got {len(agents) if agents else 0}")
+    if not agents or len(agents) < 4:
+        print(f"Expected 4 agents, got {len(agents) if agents else 0}")
         return None
 
-    # Generate JSON template dynamically from Pydantic model
     json_schema_template = model_to_json_template(NewsAnalysisReport)
-        
+
     return [
+        # Task 0: News Research (assigned to Research Agent)
         Task(
-            description=f"""QUICK SEARCH: Find 3-5 recent news articles about: {user_query}
-                        
-            SIMPLE INSTRUCTIONS:
-            1. Provide a 1-sentence summary
-            2. Find exactly 3-5 article titles and URLs
-            3. Note the source domain for each
-            4. Rate each source as High/Medium/Low reliability based on common knowledge
-            
-            REQUIRED OUTPUT FORMAT:
-            ARTICLES FOUND:
-            1. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
-            2. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
-            3. Title: [Title] | Source: [domain] | URL: [url] | Reliability: [High/Medium/Low]
-            
-            SUMMARY: [One sentence about what these articles cover]
-            """,
+            description=f"""Find and analyze 3-5 recent news articles about: {user_query}
+
+            Steps:
+            1. Check the local cache first using "Search Local Cache" tool
+            2. If fewer than 3 cached articles, search the web for more
+            3. For each article, note: title, source domain, URL
+            4. Rate each source reliability as High/Medium/Low
+            5. Identify 3-5 key themes from headlines
+            6. List 5-8 important keywords
+
+            Output format:
+            ARTICLES:
+            1. Title: [title] | Source: [domain] | URL: [url] | Reliability: [H/M/L]
+            (repeat for each article)
+
+            THEMES: [theme1, theme2, theme3]
+            KEYWORDS: [word1, word2, word3, word4, word5]
+            SUMMARY: [One sentence overview]""",
             agent=agents[0],
-            expected_output="List of 3-5 articles with titles, sources, URLs, and reliability ratings, plus a one-sentence summary."
+            expected_output="Articles list with reliability ratings, themes, keywords, and summary."
         ),
+
+        # Task 1: Social Media Analysis (assigned to Social Media Analyst)
         Task(
-            description=f"""QUICK ANALYSIS: Analyze themes from article titles found for: {user_query}
-                        
-            SIMPLE INSTRUCTIONS:
-            1. Review ONLY the article titles from the previous task
-            2. Identify 5-7 key themes/topics
-            3. List 8-10 important keywords
-            4. Note any obvious conflicts in headlines
-            5. Give a basic quality assessment
-            
-            REQUIRED OUTPUT FORMAT:
-            THEMES: [theme1, theme2, theme3, theme4, theme5]
-            KEYWORDS: [word1, word2, word3, word4, word5, word6, word7, word8]
-            CONFLICTS: [Any obvious contradictions in headlines, or "None obvious"]
-            QUALITY: [High/Medium/Low with brief reason]""",
-            agent=agents[1],
-            expected_output="Quick thematic analysis with themes, keywords, conflicts, and quality assessment from headlines only."
-        ),
-        Task(
-            description=f"""QUICK SOCIAL SEARCH: Find hashtags and sentiment for: {user_query}
-                        
-            SIMPLE INSTRUCTIONS:
+            description=f"""Analyze social media presence for: {user_query}
+
+            Steps:
             1. Search for 3-5 relevant hashtags about this topic
-            2. Assess general engagement as High/Medium/Low
+            2. Assess engagement level as High/Medium/Low
             3. Determine overall sentiment as Positive/Negative/Neutral/Mixed
-            4. Note if topic is trending or not
-            
-            REQUIRED OUTPUT FORMAT:
-            HASHTAGS: #hashtag1, #hashtag2, #hashtag3
+            4. Note if the topic is trending
+
+            Output format:
+            HASHTAGS: #tag1, #tag2, #tag3
             ENGAGEMENT: [High/Medium/Low]
             SENTIMENT: [Positive/Negative/Neutral/Mixed]
-            TRENDING: [Yes/No]
-            """,
-            agent=agents[2],
-            expected_output="Basic social media metrics with hashtags, engagement level, sentiment, and trending status."
+            TRENDING: [Yes/No]""",
+            agent=agents[1],
+            expected_output="Hashtags, engagement level, sentiment, and trending status."
         ),
+
+        # Task 2: Analysis & Reliability (assigned to Analyst Agent)
         Task(
-            description=f"""ORGANIZE DATA: Structure all findings for: {user_query}
-                        
-            SIMPLE INSTRUCTIONS:
+            description=f"""Organize and assess the findings for: {user_query}
+
+            Using the data from previous tasks:
             1. Group articles by reliability (High/Medium/Low)
-            2. Organize themes into main categories
-            3. Create simple data structure
-            4. Summarize patterns found
-            
-            REQUIRED OUTPUT FORMAT:
-            HIGH RELIABILITY: [list of high-reliability sources]
-            MEDIUM RELIABILITY: [list of medium-reliability sources]
-            LOW RELIABILITY: [list of low-reliability sources]
-            MAIN CATEGORIES: [grouped themes]
-            PATTERNS: [brief summary of what data shows]""",
-            agent=agents[3],
-            expected_output="Organized data with reliability groupings, theme categories, and pattern summary."
+            2. Identify patterns across sources
+            3. Rate overall information reliability from 1-10
+            4. Flag any red flags or contradictions
+            5. Suggest 2-3 verification steps
+
+            Output format:
+            RELIABILITY GROUPS:
+            - High: [sources]
+            - Medium: [sources]
+            - Low: [sources]
+
+            PATTERNS: [brief summary]
+            SCORE: [1-10]/10
+            RED FLAGS: [issues or "None"]
+            VERIFY: [2-3 steps]""",
+            agent=agents[2],
+            expected_output="Organized data with reliability groups, patterns, score, and verification steps."
         ),
+
+        # Task 3: Report Compilation (assigned to Report Compiler)
         Task(
-            description=f"""BASIC RELIABILITY CHECK: Assess information quality for: {user_query}
-                        
-            SIMPLE INSTRUCTIONS:
-            1. Rate overall reliability 1-10 based on sources found
-            2. Note any obvious red flags (if any)
-            3. Suggest 2-3 basic verification steps
-            4. Keep assessment simple and fast
-            
-            REQUIRED OUTPUT FORMAT:
-            RELIABILITY SCORE: [1-10]/10
-            RED FLAGS: [Any obvious issues, or "None obvious"]
-            VERIFICATION STEPS: 
-            - Step 1
-            - Step 2
-            - Step 3
-            """,
-            agent=agents[4],
-            expected_output="Basic reliability assessment with score, red flags, and verification steps."
-        ),
-        Task(
-            description=f"""COMPILE REPORT: Create JSON report for: {user_query}
-                        
-            INSTRUCTIONS:
+            description=f"""Compile all findings into a JSON report for: {user_query}
+
+            Instructions:
             1. Take all information from previous tasks
-            2. Fill the JSON template with actual data found
-            3. Use "Unknown" or "N/A" for missing information
-            4. Keep data realistic based on what was actually found
-            5. Ensure valid JSON format
-            
+            2. Fill the JSON template with actual data
+            3. Use "Unknown" or "N/A" for missing fields, but try to infer Bot Metrics and Coordination Patterns if possible based on source reliability.
+            4. Ensure valid JSON output
+
             Context:
             - Query: {user_query}
-            - URLs: {urls or 'None provided'}
-            - Keywords: {keywords or 'None provided'}
-            - Hashtags: {hashtags or 'None provided'}
-            
-            OUTPUT MUST BE VALID JSON following this template:
+            - URLs: {urls or 'None'}
+            - Keywords: {keywords or 'None'}
+            - Hashtags: {hashtags or 'None'}
+
+            OUTPUT MUST BE VALID JSON matching this schema:
             {json_schema_template}
-            
-            CRITICAL: Replace template values with ACTUAL findings from previous tasks.
-            Use simple, realistic values. Do not make up complex analysis.
-            Focus on speed and accuracy over comprehensiveness.""",
-            agent=agents[5],
-            expected_output="Complete JSON report following the NewsAnalysisReport schema with actual findings from the analysis."
+
+            CRITICAL: Use ACTUAL findings from previous tasks. Do not invent data.""",
+            agent=agents[3],
+            expected_output="Complete JSON report following the NewsAnalysisReport schema."
         )
     ]
-
-@cache_data(ttl=3600, show_spinner=False)
-def analyze_sentiment(text):
-    # Existing analysis logic
-    # Add memory cleanup
-    return {
-        'sentiment': processed_sentiment,
-        'confidence': confidence_score,
-        'emotion': dominant_emotion,
-        'subjectivity': subjectivity_score,
-        'irony_detected': irony_flag,
-        'sarcasm_level': sarcasm_level,
-        'keywords': list(keywords_set),
-        'entity_mentions': list(named_entities),
-        'topic_distribution': topic_probs
-    }

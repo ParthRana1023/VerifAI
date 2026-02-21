@@ -1,124 +1,134 @@
 from crewai import Agent
-from crewai_tools import SerperDevTool, ScrapeWebsiteTool, WebsiteSearchTool
-from setup import setup_crewai_config, check_gemini_status, get_llm
+from crewai.tools import tool
+from crewai_tools import SerperDevTool, ScrapeWebsiteTool
+from setup import setup_crewai_config, check_llm_status, get_llm
+from cache_service import search_cache, get_cache_stats, cache_articles
 import streamlit as st
-from tenacity import retry, stop_after_attempt, wait_exponential
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@tool("Search Local Cache")
+def cached_search_tool(search_query: str) -> str:
+    """Search the local article cache for previously scraped articles matching the query.
+    Use this tool FIRST before searching the web. Returns cached articles if available."""
+    try:
+        cached = search_cache(search_query, n_results=5)
+        if not cached:
+            return "No cached articles found. Please use the web search tool to find articles."
+
+        result_lines = [f"Found {len(cached)} cached articles:\n"]
+        for i, article in enumerate(cached, 1):
+            result_lines.append(
+                f"{i}. Title: {article['title']} | "
+                f"Source: {article['source']} | "
+                f"URL: {article['url']} | "
+                f"Similarity: {article['similarity']}"
+            )
+        result_lines.append(
+            f"\n{'These cached results are sufficient.' if len(cached) >= 3 else 'Fewer than 3 cached results. Consider searching the web for more.'}"
+        )
+        return "\n".join(result_lines)
+    except Exception as e:
+        logger.warning("Cache search failed: %s", e)
+        return "Cache search failed. Please use the web search tool instead."
+
+
+class RealtimeCachedScrapeTool(ScrapeWebsiteTool):
+    """Scrapes a website and immediately caches the content in ChromaDB."""
+    def _run(self, **kwargs) -> str:
+        content = super()._run(**kwargs)
+        website_url = kwargs.get('website_url', '')
+        if website_url and content:
+            try:
+                source = website_url.split('/')[2] if '//' in website_url else "Web"
+                cache_articles("Realtime Web Scrape", [{
+                    "title": website_url,
+                    "url": website_url,
+                    "source": source,
+                    "content_snippet": content[:500]
+                }])
+                logger.info("Cached scraped content from %s", website_url)
+            except Exception as e:
+                logger.warning("Cache failed for %s: %s", website_url, e)
+        return content
+
 
 def create_news_analysis_agents():
-    # Setup CrewAI configuration first
+    """Create 4 optimized agents for news analysis with minimal token usage."""
     setup_crewai_config()
-    
-    # Check Gemini status
-    gemini_ok, gemini_msg = check_gemini_status()
-    if not gemini_ok:
-        st.error(f"Gemini issue: {gemini_msg}")
+
+    llm_ok, llm_msg = check_llm_status()
+    if not llm_ok:
+        st.error(f"LLM issue: {llm_msg}")
         return None
-    
-    # Initialize LLM with proper error handling
+
     llm = get_llm()
     if not llm:
-        if 'st' in globals():
-            st.error("Failed to initialize LLM")
-        else:
-            print("Failed to initialize LLM")
+        st.error("Failed to initialize LLM")
         return None
 
+    # Log cache status
+    stats = get_cache_stats()
+    logger.info("Cache: %s (%d articles)", stats["status"], stats["count"])
+
     try:
-        # Initialize tools with error handling and timeout configurations
         serper_tool = SerperDevTool()
-        scrape_tool = ScrapeWebsiteTool()
-        search_tool = WebsiteSearchTool()
-        
+        scrape_tool = RealtimeCachedScrapeTool()
+
         return [
+            # Agent 0: News Research Agent (merges Web Crawler + News Content Analyst)
             Agent(
-                role="Web Crawler",
-                goal="Quickly find 3-5 recent news articles about the query using search tools only",
-                backstory="An efficient web crawler that focuses on finding the most relevant recent articles quickly without deep scraping.",
-                tools=[serper_tool, scrape_tool, search_tool],
+                role="News Researcher",
+                goal="Find and analyze 3-5 recent news articles about the query",
+                backstory="A skilled news researcher who efficiently finds relevant articles, "
+                          "extracts key themes from headlines, and rates source reliability.",
+                tools=[cached_search_tool, serper_tool, scrape_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                step_callback=None,
-                system_message="Focus only on finding article titles, URLs, and sources. Do not analyze content deeply. Limit to 3-5 articles maximum."
+                max_iter=2,
             ),
+            # Agent 1: Social Media Analyst (kept separate per user request)
             Agent(
-                role="News Content Analyst",
-                goal="Quickly analyze the main themes from article titles and summaries only",
-                backstory="A fast content analyst who works with article titles, headlines, and brief summaries to extract key themes without deep content analysis.",
-                tools=[serper_tool, scrape_tool, search_tool],
+                role="Social Media Analyst",
+                goal="Find trending hashtags and assess public sentiment about the topic",
+                backstory="A social media specialist who quickly identifies relevant hashtags, "
+                          "engagement levels, and overall public sentiment on a topic.",
+                tools=[cached_search_tool, serper_tool],
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                step_callback=None,
-                system_message="Analyze only headlines and brief summaries. Do not scrape full article content. Focus on identifying 5-7 key themes quickly."
+                max_iter=2,
             ),
+            # Agent 2: Analyst (merges Data Organizer + Reliability Assessor)
             Agent(
-                role="Social Media Tracking Specialist", 
-                goal="Quickly identify trending hashtags and basic sentiment using search only",
-                backstory="A social media expert who uses search tools to quickly identify popular hashtags and general sentiment without deep analysis.",
-                tools=[serper_tool, scrape_tool, search_tool],
+                role="Data Analyst",
+                goal="Organize findings by reliability and assess overall information quality",
+                backstory="An analyst who structures data by source reliability, identifies "
+                          "patterns, flags red flags, and suggests verification steps.",
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                step_callback=None,
-                system_message="Find 3-5 popular hashtags and general sentiment quickly. Do not perform deep social media analysis."
+                max_iter=2,
             ),
-            Agent(
-                role="Data Organizer",
-                goal="Organize the collected information into structured format", 
-                backstory="A data organization specialist who structures information efficiently without additional research.",
-                llm=llm,
-                verbose=True,
-                allow_delegation=False,
-                memory=False,
-                step_callback=None,
-                system_message="Only organize and structure data provided by other agents. Do not conduct additional research."
-            ),
-            Agent(
-                role="Basic Reliability Assessor",
-                goal="Provide basic reliability assessment of sources without deep investigation",
-                backstory="A reliability assessor who provides quick, basic credibility checks based on well-known source reputations.",
-                tools=[serper_tool, scrape_tool, search_tool],
-                llm=llm,
-                verbose=True,
-                allow_delegation=False,
-                memory=False,
-                step_callback=None,
-                system_message="Provide basic reliability scores based on common knowledge of source credibility. Do not conduct deep verification research."
-            ),
+            # Agent 3: Report Compiler
             Agent(
                 role="Report Compiler",
-                goal="Compile all findings into the required JSON report format",
-                backstory="A report writer who efficiently compiles analysis into structured JSON format without additional research.",
+                goal="Compile all findings into a structured JSON report",
+                backstory="A report writer who efficiently compiles analysis results into "
+                          "the required JSON schema format without additional research.",
                 llm=llm,
                 verbose=True,
                 allow_delegation=False,
                 memory=False,
-                step_callback=None,
-                system_message="Compile provided information into the required JSON schema. Do not conduct additional research or analysis."
-            )
+                max_iter=2,
+            ),
         ]
     except Exception as e:
-        if 'st' in globals():
-            st.error(f"Failed to create agents: {e}")
-        else:
-            print(f"Failed to create agents: {e}")
-        return None
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def fetch_news_api(query):
-    try:
-        response = requests.get(API_ENDPOINT, 
-            params={'q': query},
-            headers={'Authorization': f'Bearer {os.getenv("API_KEY")}'},
-            timeout=15
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        logging.error(f"API Error: {str(e)}", exc_info=True)
+        st.error(f"Failed to create agents: {e}")
         return None

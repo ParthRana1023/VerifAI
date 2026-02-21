@@ -109,7 +109,7 @@ class NewsAnalysisReport(BaseModel):
     similar_posts_time_series: List[TimeSeriesData] = Field(default_factory=list, description="Time-series data showing the trend of similar news posts.")
     fake_news_sites: List[str] = Field(default_factory=list, description="List of identified fake news or unreliable sources.")
     content_analysis: ContentAnalysis = Field(..., description="Detailed analysis of the news content characteristics.")
-    propaganda_analysis: PropagandaAnalysis = Field(..., description="Analysis of propaganda techniques and misinformation indicators.")
+    enhanced_propaganda_analysis: EnhancedPropagandaAnalysis = Field(..., description="In-depth analysis of propaganda, bots, coordination, and fake news networks.")
     platform_facts: List[str] = Field(default_factory=list, description="Facts and observations related to the platform where the news was found.")
     cross_source_facts: List[str] = Field(default_factory=list, description="Facts cross-verified across multiple sources.")
     analysis_note: str = Field(default="No specific notes.", description="Any additional notes or disclaimers about the analysis.")

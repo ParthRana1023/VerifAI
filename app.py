@@ -2,23 +2,68 @@ from crewai import Crew, Process
 import streamlit as st
 from agents import create_news_analysis_agents
 from tasks import create_news_analysis_tasks
-from setup import setup_crewai_config, setup_api_keys, check_gemini_status
+from setup import setup_crewai_config, setup_api_keys, check_llm_status
 import time
 import traceback
 import json
+import re
 from models import NewsAnalysisReport
+from cache_service import cache_articles
 import os
 
 os.environ["STREAMLIT_SERVER_ENABLE_FILE_WATCHER"] = "false"
+
+
+def extract_json_from_response(response_text: str) -> str | None:
+    """Extract JSON content from a potentially markdown-wrapped LLM response.
+    
+    Handles responses wrapped in ```json ... ``` code fences as well as
+    bare JSON objects.
+    """
+    if not response_text:
+        return None
+
+    text = response_text.strip()
+
+    # 1. Try to extract from markdown code fences  (```json ... ```)
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+
+    # 2. Try to find the outermost { ... } block
+    first_brace = text.find("{")
+    if first_brace != -1:
+        # Walk backwards from end to find the matching closing brace
+        last_brace = text.rfind("}")
+        if last_brace > first_brace:
+            return text[first_brace : last_brace + 1]
+
+    return None
+
+
+def clean_json_string(json_string: str) -> str:
+    """Fix common JSON formatting issues produced by LLMs."""
+    if not json_string:
+        return json_string
+
+    # Remove trailing commas before } or ]
+    cleaned = re.sub(r",\s*([}\]])", r"\1", json_string)
+
+    # Replace unescaped newlines inside string values
+    # (a lightweight heuristic – won't cover every edge-case)
+    cleaned = cleaned.replace("\r\n", "\\n").replace("\r", "\\n")
+
+    return cleaned
+
 
 def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None):
     # Setup CrewAI configuration
     setup_crewai_config()
 
-    # Check Gemini API key
-    gemini_ok, gemini_msg = check_gemini_status()
-    if not gemini_ok:
-        st.error(f"Gemini API Key Error: {gemini_msg}")
+    # Check LLM API key
+    llm_ok, llm_msg = check_llm_status()
+    if not llm_ok:
+        st.error(f"LLM API Key Error: {llm_msg}")
     
     agents = create_news_analysis_agents()
     if not agents:
@@ -38,7 +83,7 @@ def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=Non
             memory=False,  # Disable memory to avoid potential issues
             verbose=True,
             # Reduced timeout - optimized tasks should complete faster
-            max_execution_time=600,  # 10 minutes max (reduced from 15)
+            max_execution_time=300,  # 5 minutes max (reduced from 10)
             # Disable planning which can cause issues with Ollama
             # planning=False,
             # Disable embedder which can cause issues
@@ -47,6 +92,55 @@ def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=Non
     except Exception as e:
         st.error(f"Failed to create crew: {e}")
         return None
+
+
+def _cache_result_articles(query: str, result):
+    """Extract articles from analysis result and cache them in ChromaDB."""
+    try:
+        articles_to_cache = []
+
+        if isinstance(result, dict):
+            # Handle dict-format results
+            for article in result.get("related_articles", []):
+                if isinstance(article, dict) and article.get("url"):
+                    articles_to_cache.append({
+                        "title": article.get("title", article.get("source", "Unknown")),
+                        "url": article["url"],
+                        "source": article.get("source", "Unknown"),
+                        "content_snippet": article.get("summary", ""),
+                    })
+            # Also try key_findings as general content
+            if result.get("key_findings") and not articles_to_cache:
+                articles_to_cache.append({
+                    "title": result.get("query_summary", query),
+                    "url": f"analysis://{query.replace(' ', '-')}",
+                    "source": "VerifAI Analysis",
+                    "content_snippet": str(result["key_findings"])[:500],
+                })
+        elif hasattr(result, "related_articles"):
+            # Handle Pydantic model results
+            for article in (result.related_articles or []):
+                url = getattr(article, "url", "") or ""
+                if url:
+                    articles_to_cache.append({
+                        "title": getattr(article, "title", "Unknown"),
+                        "url": url,
+                        "source": getattr(article, "source", "Unknown"),
+                        "content_snippet": getattr(article, "summary", ""),
+                    })
+
+        if articles_to_cache:
+            cached = cache_articles(query, articles_to_cache)
+            if cached > 0:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Cached %d articles from analysis for '%s'", cached, query
+                )
+    except Exception as e:
+        # Caching failure should never break the analysis
+        import logging
+        logging.getLogger(__name__).warning("Failed to cache articles: %s", e)
+
 
 def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
     try:
@@ -93,6 +187,9 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         try:
             st.info("🔍 Phase 1: Searching for news articles...")
             progress_bar.progress(30)
+            
+            # 5-second buffer before crew kickoff to avoid Groq rate limits
+            time.sleep(5)
             
             result = crew.kickoff(inputs=inputs)
             
@@ -170,39 +267,27 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
             with st.expander("Debug: Raw Result"):
                 st.text(str(result)[:1000] + "..." if len(str(result)) > 1000 else str(result))
             
-            # Create a simple fallback report structure
+            # Create a simple fallback report structure matching NewsAnalysisReport model
             final_result = {
                 'query_summary': f"Analysis for: {user_query}",
                 'key_findings': str(result)[:500] + "..." if len(str(result)) > 500 else str(result),
                 'related_articles': [],
                 'related_words': user_query.split(),
-                'topic_clusters': [{'topic': 'General Analysis', 'size': 1, 'related_narratives': ['Raw analysis output']}],
+                'topic_clusters': [{'cluster_name': 'General Analysis', 'keywords': user_query.split(), 'article_count': 1}],
                 'top_sources': [],
                 'top_hashtags': [],
                 'similar_posts_time_series': [],
                 'fake_news_sites': [],
                 'content_analysis': {
-                    'language_percentage': 0.0,
-                    'coordination_percentage': 0.0,
-                    'source_percentage': 0.0,
-                    'bot_like_activity_percentage': 0.0
+                    'sentiment': 'Neutral',
+                    'bias': 'Unknown',
+                    'readability_score': 0.0,
+                    'key_entities': []
                 },
                 'propaganda_analysis': {
-                    'overall_reliability_score': 50.0,
-                    'propaganda_techniques': [],
-                    'misinformation_indicators': [],
-                    'coordination_patterns': [],
-                    'bot_activity_metrics': {
-                        'bot_likelihood_score': 0.0,
-                        'account_creation_patterns': 'Unknown',
-                        'behavioral_indicators': [],
-                        'network_analysis': 'Analysis incomplete'
-                    },
-                    'fake_news_sites': [],
-                    'manipulation_timeline': [],
-                    'narrative_fingerprint': {},
-                    'cross_verification_results': {},
-                    'recommended_verification_steps': ['Check multiple sources', 'Verify with fact-checkers']
+                    'propaganda_techniques_detected': [],
+                    'misinformation_indicators_detected': [],
+                    'overall_risk_score': 0.0
                 },
                 'platform_facts': ['Analysis incomplete due to parsing issues'],
                 'cross_source_facts': ['Please refer to raw output above'],
@@ -217,6 +302,9 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         progress_bar.empty()
         status_text.empty()
         
+        # Cache article data for future queries
+        _cache_result_articles(user_query, final_result)
+
         return final_result
         
     except Exception as e:
