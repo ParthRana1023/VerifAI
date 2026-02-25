@@ -7,11 +7,113 @@ import time
 import traceback
 import json
 import re
+from logger_config import get_logger
 from models import NewsAnalysisReport
 from cache_service import cache_articles
 import os
 
 os.environ["STREAMLIT_SERVER_ENABLE_FILE_WATCHER"] = "false"
+
+_logger = get_logger(__name__)
+
+
+def normalize_report_scores(report):
+    """Fix common LLM scale mismatches in the parsed report.
+
+    Works on both dict and Pydantic model instances.
+    """
+    def _set(obj, key, value):
+        if isinstance(obj, dict):
+            obj[key] = value
+        else:
+            setattr(obj, key, value)
+
+    def _get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    # --- Propaganda analysis fixes ---
+    propaganda = _get(report, "propaganda_analysis")
+    if propaganda:
+        # overall_reliability_score: expected 0-100, LLM may return 0-1
+        reliability = _get(propaganda, "overall_reliability_score", 0)
+        if isinstance(reliability, (int, float)) and 0 < reliability <= 1.0:
+            _set(propaganda, "overall_reliability_score", round(reliability * 100, 1))
+
+        # bot_likelihood_score: expected 0-1, LLM may return 0-100
+        bot_metrics = _get(propaganda, "bot_activity_metrics")
+        if bot_metrics:
+            bot_score = _get(bot_metrics, "bot_likelihood_score", 0)
+            if isinstance(bot_score, (int, float)) and bot_score > 1.0:
+                _set(bot_metrics, "bot_likelihood_score", round(bot_score / 100, 4))
+
+        # narrative_fingerprint: expected 0-1, LLM may return 0-100
+        fingerprint = _get(propaganda, "narrative_fingerprint", {})
+        if fingerprint:
+            corrected = {}
+            for key, val in (fingerprint.items() if isinstance(fingerprint, dict) else []):
+                if isinstance(val, (int, float)) and val > 1.0:
+                    corrected[key] = round(val / 100, 4)
+                else:
+                    corrected[key] = val
+            _set(propaganda, "narrative_fingerprint", corrected)
+
+    return report
+
+
+def inject_platform_metrics(report, platform_metrics):
+    """Overwrite LLM-generated zero metrics with real platform data.
+
+    ``platform_metrics`` is expected to come from
+    ``reddit.compute_reddit_engagement()`` and/or ``trends_service``.
+    """
+    if not platform_metrics:
+        return report
+
+    def _get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    def _set(obj, key, value):
+        if isinstance(obj, dict):
+            obj[key] = value
+        else:
+            setattr(obj, key, value)
+
+    # Inject engagement into top_hashtags that have zero values
+    engagement_rate = platform_metrics.get("engagement_rate", 0)
+    reach = platform_metrics.get("reach", 0)
+    sentiment = platform_metrics.get("sentiment_from_ratio", "Neutral")
+
+    top_hashtags = _get(report, "top_hashtags", [])
+    if top_hashtags:
+        for ht in top_hashtags:
+            if _get(ht, "engagement_rate", 0) == 0 and engagement_rate > 0:
+                _set(ht, "engagement_rate", engagement_rate)
+            if _get(ht, "reach", 0) == 0 and reach > 0:
+                _set(ht, "reach", reach)
+            if _get(ht, "sentiment", "Neutral") == "Neutral" and sentiment != "Neutral":
+                _set(ht, "sentiment", sentiment)
+
+    # Inject into source engagement
+    total_interactions = platform_metrics.get("total_interactions", 0)
+    top_sources = _get(report, "top_sources", [])
+    if top_sources and total_interactions > 0:
+        per_source = total_interactions // max(len(top_sources), 1)
+        for source in top_sources:
+            if _get(source, "engagement", 0) == 0:
+                _set(source, "engagement", per_source)
+
+    # Inject Google Trends time series if available
+    trends_ts = platform_metrics.get("trends_time_series", [])
+    if trends_ts:
+        existing_ts = _get(report, "similar_posts_time_series", [])
+        if not existing_ts:
+            _set(report, "similar_posts_time_series", trends_ts)
+
+    return report
 
 
 def extract_json_from_response(response_text: str) -> str | None:
@@ -42,30 +144,101 @@ def extract_json_from_response(response_text: str) -> str | None:
 
 
 def clean_json_string(json_string: str) -> str:
-    """Fix common JSON formatting issues produced by LLMs."""
+    """Fix common JSON formatting issues produced by LLMs.
+
+    Applies multiple repair passes:
+    1. Remove trailing commas before } or ]
+    2. Add missing commas between adjacent elements
+    3. Strip control characters
+    4. Fix unescaped quotes inside string values
+    5. Replace single quotes with double quotes (outside strings)
+    """
     if not json_string:
         return json_string
 
-    # Remove trailing commas before } or ]
+    # Pass 1: Remove trailing commas before } or ]
     cleaned = re.sub(r",\s*([}\]])", r"\1", json_string)
 
-    # Replace unescaped newlines inside string values
-    # (a lightweight heuristic – won't cover every edge-case)
+    # Pass 2: Replace literal \r\n with \\n (unescaped newlines in strings)
     cleaned = cleaned.replace("\r\n", "\\n").replace("\r", "\\n")
+
+    # Pass 3: Add missing commas between adjacent JSON elements.
+    # This fixes the exact error: "Expecting ',' delimiter"
+    # Pattern: "value"\n"key" → "value",\n"key"  (string → string)
+    cleaned = re.sub(r'"\s*\n(\s*")', r'",\n\1', cleaned)
+    # Pattern: }\n{ or ]\n{ or }\n" etc.
+    cleaned = re.sub(r'(\})\s*\n(\s*\{)', r'\1,\n\2', cleaned)
+    cleaned = re.sub(r'(\])\s*\n(\s*[\{"])', r'\1,\n\2', cleaned)
+    cleaned = re.sub(r'(\})\s*\n(\s*")', r'\1,\n\2', cleaned)
+    # Pattern: number/true/false/null followed by newline then "key"
+    cleaned = re.sub(r'(\d|true|false|null)\s*\n(\s*")', r'\1,\n\2', cleaned)
+
+    # Pass 4: Remove any trailing commas we may have just re-introduced
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+
+    # Pass 5: Remove non-printable control characters (except \n, \t)
+    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', cleaned)
 
     return cleaned
 
 
-def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None):
+def _try_repair_json(json_string: str) -> dict | None:
+    """Attempt to repair and parse malformed JSON using multiple strategies."""
+
+    # Strategy 1: Try the json_repair library if available
+    try:
+        import json_repair
+        repaired = json_repair.loads(json_string)
+        if isinstance(repaired, dict):
+            _logger.info("JSON repaired using json_repair library")
+            return repaired
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # Strategy 2: Try ast.literal_eval (handles single quotes, trailing commas)
+    try:
+        import ast
+        result = ast.literal_eval(json_string)
+        if isinstance(result, dict):
+            _logger.info("JSON parsed using ast.literal_eval")
+            return result
+    except Exception:
+        pass
+
+    # Strategy 3: Try fixing truncated JSON by closing open brackets
+    try:
+        fixed = json_string.rstrip()
+        # Count open vs close braces/brackets
+        open_braces = fixed.count('{') - fixed.count('}')
+        open_brackets = fixed.count('[') - fixed.count(']')
+        # Remove any trailing comma
+        fixed = re.sub(r',\s*$', '', fixed)
+        # Close any unclosed brackets/braces
+        fixed += ']' * max(open_brackets, 0)
+        fixed += '}' * max(open_braces, 0)
+        result = json.loads(fixed)
+        if isinstance(result, dict):
+            _logger.info("JSON repaired by closing %d braces and %d brackets",
+                        open_braces, open_brackets)
+            return result
+    except Exception:
+        pass
+
+    return None
+
+
+def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=None, llm_provider="gemini", model_name=None):
     # Setup CrewAI configuration
-    setup_crewai_config()
+    setup_crewai_config(llm_provider)
 
     # Check LLM API key
-    llm_ok, llm_msg = check_llm_status()
+    llm_ok, llm_msg = check_llm_status(llm_provider)
     if not llm_ok:
         st.error(f"LLM API Key Error: {llm_msg}")
     
-    agents = create_news_analysis_agents()
+    agents = create_news_analysis_agents(llm_provider, model_name=model_name)
     if not agents:
         st.error("Failed to create agents")
         return None
@@ -81,7 +254,7 @@ def create_news_analysis_crew(user_query, urls=None, hashtags=None, keywords=Non
             tasks=tasks, 
             process=Process.sequential,
             memory=False,  # Disable memory to avoid potential issues
-            verbose=True,
+            verbose=False,
             # Reduced timeout - optimized tasks should complete faster
             max_execution_time=300,  # 5 minutes max (reduced from 10)
             # Disable planning which can cause issues with Ollama
@@ -132,20 +305,18 @@ def _cache_result_articles(query: str, result):
         if articles_to_cache:
             cached = cache_articles(query, articles_to_cache)
             if cached > 0:
-                import logging
-                logging.getLogger(__name__).info(
+                _logger.info(
                     "Cached %d articles from analysis for '%s'", cached, query
                 )
     except Exception as e:
         # Caching failure should never break the analysis
-        import logging
-        logging.getLogger(__name__).warning("Failed to cache articles: %s", e)
+        _logger.warning("Failed to cache articles: %s", e)
 
 
-def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
+def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None, llm_provider="gemini", model_name=None, platform_metrics=None):
     try:
         # Ensure configuration is set up
-        setup_crewai_config()
+        setup_crewai_config(llm_provider)
         
         # Validate inputs
         if not user_query or len(user_query.strip()) < 3:
@@ -160,7 +331,7 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         progress_bar.progress(5)
         
         # Create crew with timeout handling
-        crew = create_news_analysis_crew(user_query, urls, hashtags, keywords)
+        crew = create_news_analysis_crew(user_query, urls, hashtags, keywords, llm_provider, model_name=model_name)
         if not crew:
             st.error("Failed to create analysis crew")
             return None
@@ -188,8 +359,7 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
             st.info("🔍 Phase 1: Searching for news articles...")
             progress_bar.progress(30)
             
-            # 5-second buffer before crew kickoff to avoid Groq rate limits
-            time.sleep(5)
+            time.sleep(1)  # Brief buffer before crew kickoff
             
             result = crew.kickoff(inputs=inputs)
             
@@ -248,16 +418,26 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
                 st.success("✅ Successfully parsed structured report!")
                 
             except json.JSONDecodeError as je:
+                _logger.warning("JSON parsing failed: %s", je)
                 st.warning(f"JSON parsing failed: {je}")
-                st.info("Attempting alternative parsing methods...")
+                st.info("Attempting repair...")
                 
-                # Try using model_validate_json directly
+                # Try model_validate_json directly
                 try:
                     final_result = NewsAnalysisReport.model_validate_json(json_string)
                     st.success("✅ Successfully parsed with alternative method!")
-                except Exception as e2:
-                    st.warning(f"Alternative parsing also failed: {e2}")
-                    raise e2
+                except Exception:
+                    # Try the multi-strategy repair
+                    repaired = _try_repair_json(json_string)
+                    if repaired:
+                        try:
+                            final_result = NewsAnalysisReport.model_validate(repaired)
+                            st.success("✅ Successfully repaired and parsed JSON!")
+                        except Exception as e3:
+                            _logger.warning("Repair succeeded but validation failed: %s", e3)
+                            raise e3
+                    else:
+                        raise je
             
         except Exception as e:
             st.warning(f"Could not parse report into structured format: {e}")
@@ -279,15 +459,22 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
                 'similar_posts_time_series': [],
                 'fake_news_sites': [],
                 'content_analysis': {
-                    'sentiment': 'Neutral',
-                    'bias': 'Unknown',
-                    'readability_score': 0.0,
-                    'key_entities': []
+                    'language_percentage': 0.0,
+                    'coordination_percentage': 0.0,
+                    'source_percentage': 0.0,
+                    'bot_like_activity_percentage': 0.0
                 },
                 'propaganda_analysis': {
-                    'propaganda_techniques_detected': [],
-                    'misinformation_indicators_detected': [],
-                    'overall_risk_score': 0.0
+                    'overall_reliability_score': 0.0,
+                    'propaganda_techniques': [],
+                    'misinformation_indicators': [],
+                    'coordination_patterns': [],
+                    'bot_activity_metrics': {},
+                    'fake_news_sites': [],
+                    'manipulation_timeline': [],
+                    'narrative_fingerprint': {},
+                    'cross_verification_results': {},
+                    'recommended_verification_steps': []
                 },
                 'platform_facts': ['Analysis incomplete due to parsing issues'],
                 'cross_source_facts': ['Please refer to raw output above'],
@@ -302,6 +489,10 @@ def run_news_analysis(user_query, urls=None, hashtags=None, keywords=None):
         progress_bar.empty()
         status_text.empty()
         
+        # Normalize LLM scale mismatches and inject real platform metrics
+        final_result = normalize_report_scores(final_result)
+        final_result = inject_platform_metrics(final_result, platform_metrics)
+
         # Cache article data for future queries
         _cache_result_articles(user_query, final_result)
 
@@ -340,87 +531,9 @@ def get_report_as_markdown(report):
     if isinstance(report, str):
         return f"# News Analysis Report\n\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{report}"
     
-    # Handle dictionary fallback format
-    if isinstance(report, dict) and 'analysis_note' in report:
-        markdown_content = []
-        markdown_content.append(f"# News Analysis Report: {report.get('query_summary', 'Unknown')}")
-        markdown_content.append(f"\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        markdown_content.append("---\n")
-        markdown_content.append("## Key Findings\n")
-        markdown_content.append(f"{report.get('key_findings', 'No findings available')}\n")
-        markdown_content.append("---\n")
-        markdown_content.append(f"*Note: {report.get('analysis_note', 'Standard analysis')}*")
-        return "\n".join(markdown_content)
-    
     try:
-        # Try to format structured report
-        markdown_content = []
-        markdown_content.append(f"# News Analysis Report: {getattr(report, 'query_summary', 'Unknown Topic')}")
-        markdown_content.append(f"\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        markdown_content.append("---\n")
-        
-        # Key Findings & Summary
-        markdown_content.append("## Key Findings & Summary\n")
-        markdown_content.append(f"{getattr(report, 'key_findings', 'No key findings available')}\n")
-        
-        # Related Articles
-        markdown_content.append("## Related Articles\n")
-        related_articles = getattr(report, 'related_articles', [])
-        if related_articles:
-            for article in related_articles:
-                if isinstance(article, dict):
-                    title = article.get('title', 'Unknown Title')
-                    url = article.get('url', '#')
-                    markdown_content.append(f"- [{title}]({url})")
-        else:
-            markdown_content.append("No related articles found")
-        markdown_content.append("")
-        
-        # Related Words
-        markdown_content.append("## Related Keywords\n")
-        related_words = getattr(report, 'related_words', [])
-        if related_words:
-            markdown_content.append(", ".join(related_words))
-        else:
-            markdown_content.append("No related words found")
-        markdown_content.append("")
-        
-        # Topic Clusters
-        markdown_content.append("## Topic Analysis\n")
-        topic_clusters = getattr(report, 'topic_clusters', [])
-        if topic_clusters:
-            for cluster in topic_clusters:
-                if isinstance(cluster, dict):
-                    topic = cluster.get('topic', 'Unknown Topic')
-                    size = cluster.get('size', 0)
-                    markdown_content.append(f"- **{topic}** (Relevance Score: {size})")
-        else:
-            markdown_content.append("No topic analysis available")
-        markdown_content.append("")
-        
-        # Top Sources
-        markdown_content.append("## Source Analysis\n")
-        top_sources = getattr(report, 'top_sources', [])
-        if top_sources:
-            markdown_content.append("| Domain | Reliability | Articles | Engagement |\n")
-            markdown_content.append("|--------|-------------|----------|------------|\n")
-            for source in top_sources:
-                domain = getattr(source, 'domain', 'N/A')
-                factual = getattr(source, 'factual_rating', 'N/A')
-                articles = getattr(source, 'articles_count', 0)
-                engagement = getattr(source, 'engagement', 0)
-                markdown_content.append(f"| {domain} | {factual} | {articles} | {engagement} |\n")
-        else:
-            markdown_content.append("No source analysis available")
-        markdown_content.append("")
-        
-        # Analysis Summary
-        markdown_content.append("## Summary\n")
-        markdown_content.append("This report was generated using automated AI analysis tools. ")
-        markdown_content.append("Results should be verified with additional sources for critical decisions.")
-        
-        return "\n".join(markdown_content)
-        
+        from save_report import generate_report_markdown
+        return generate_report_markdown(report)
     except Exception as e:
         # Fallback to string representation
         return f"# News Analysis Report\n\nGenerated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n{str(report)}\n\n---\n\n*Note: Error formatting structured report: {str(e)}*"

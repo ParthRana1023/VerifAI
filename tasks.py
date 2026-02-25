@@ -2,6 +2,9 @@ import json
 from crewai import Task
 from models import NewsAnalysisReport
 from typing import List
+from logger_config import get_logger
+
+_logger = get_logger(__name__)
 
 
 def model_to_json_template(model_class: type) -> str:
@@ -14,7 +17,7 @@ def create_news_analysis_tasks(agents: List, user_query: str,
                                hashtags: List[str] = None,
                                keywords: List[str] = None) -> List[Task]:
     if not agents or len(agents) < 4:
-        print(f"Expected 4 agents, got {len(agents) if agents else 0}")
+        _logger.error("Expected 4 agents, got %d", len(agents) if agents else 0)
         return None
 
     json_schema_template = model_to_json_template(NewsAnalysisReport)
@@ -97,6 +100,15 @@ def create_news_analysis_tasks(agents: List, user_query: str,
             2. Fill the JSON template with actual data
             3. Use "Unknown" or "N/A" for missing fields, but try to infer Bot Metrics and Coordination Patterns if possible based on source reliability.
             4. Ensure valid JSON output
+
+            CRITICAL SCALE REQUIREMENTS:
+            - overall_reliability_score: INTEGER 0-100 (e.g. 75 means 75% reliable, NOT 0.75)
+            - bot_likelihood_score: FLOAT 0.0-1.0 (e.g. 0.10 means 10% bot likelihood)
+            - narrative_fingerprint values: FLOAT 0.0-1.0 (e.g. 0.85 means 85% strength)
+            - severity: FLOAT 0-10 (e.g. 3.5 means moderate severity)
+            - engagement_rate: FLOAT percentage (e.g. 2.5 means 2.5% engagement rate)
+            - reach: INTEGER estimated audience size (use reasonable estimate, never 0 if topic is trending)
+            - If a hashtag is trending, estimate reach based on topic popularity (e.g. 1000-100000)
 
             Context:
             - Query: {user_query}

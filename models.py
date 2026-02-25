@@ -82,34 +82,18 @@ class TopicCluster(BaseModel):
     keywords: List[str] = Field(default_factory=list, description="Keywords associated with this cluster.")
     article_count: int = Field(..., description="Number of articles in this cluster.")
 
-class SourceInfo(BaseModel):
-    name: str = Field(..., description="Name of the news source.")
-    url: str = Field(..., description="URL of the news source.")
-    reliability_score: float = Field(..., description="Reliability score of the source (e.g., 0-100).")
-
-class ContentAnalysis(BaseModel):
-    sentiment: str = Field(..., description="Overall sentiment of the content (Positive, Negative, Neutral).")
-    bias: str = Field(..., description="Identified bias in the content (e.g., Left-leaning, Right-leaning, Neutral).")
-    readability_score: float = Field(..., description="Readability score of the content.")
-    key_entities: List[str] = Field(default_factory=list, description="Key entities mentioned in the content.")
-
-class PropagandaAnalysis(BaseModel):
-    propaganda_techniques_detected: List[str] = Field(default_factory=list, description="List of propaganda techniques detected.")
-    misinformation_indicators_detected: List[str] = Field(default_factory=list, description="List of misinformation indicators detected.")
-    overall_risk_score: float = Field(..., description="Overall risk score for propaganda/misinformation (0-100).")
-
 class NewsAnalysisReport(BaseModel):
     query_summary: str = Field(..., description="A concise summary of the news analysis query.")
     key_findings: str = Field(..., description="The most important insights and conclusions from the analysis.")
     related_articles: List[RelatedArticle] = Field(default_factory=list, description="A list of related articles found during the analysis.")
     related_words: List[str] = Field(default_factory=list, description="Key words and phrases extracted from the news content.")
     topic_clusters: List[TopicCluster] = Field(default_factory=list, description="Identified clusters of related topics within the news.")
-    top_sources: List[SourceInfo] = Field(default_factory=list, description="Information about the most relevant news sources.")
-    top_hashtags: List[str] = Field(default_factory=list, description="Prominent hashtags associated with the news.")
+    top_sources: List[SourceReliability] = Field(default_factory=list, description="Information about the most relevant news sources.")
+    top_hashtags: List[SocialMediaMetrics] = Field(default_factory=list, description="Prominent hashtags associated with the news.")
     similar_posts_time_series: List[TimeSeriesData] = Field(default_factory=list, description="Time-series data showing the trend of similar news posts.")
     fake_news_sites: List[str] = Field(default_factory=list, description="List of identified fake news or unreliable sources.")
-    content_analysis: ContentAnalysis = Field(..., description="Detailed analysis of the news content characteristics.")
-    enhanced_propaganda_analysis: EnhancedPropagandaAnalysis = Field(..., description="In-depth analysis of propaganda, bots, coordination, and fake news networks.")
+    content_analysis: ContentAnalysisMetrics = Field(..., description="Detailed content analysis metrics.")
+    propaganda_analysis: EnhancedPropagandaAnalysis = Field(..., description="In-depth analysis of propaganda, bots, coordination, and fake news networks.")
     platform_facts: List[str] = Field(default_factory=list, description="Facts and observations related to the platform where the news was found.")
     cross_source_facts: List[str] = Field(default_factory=list, description="Facts cross-verified across multiple sources.")
     analysis_note: str = Field(default="No specific notes.", description="Any additional notes or disclaimers about the analysis.")

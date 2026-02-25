@@ -1,158 +1,302 @@
-import streamlit as st
+"""
+save_report.py — Convert a NewsAnalysisReport (dict or Pydantic model) to Markdown.
+"""
+
+from logger_config import get_logger
+
+_logger = get_logger(__name__)
+
+
+def _get(obj, key, default=None):
+    """Get attribute from dict or Pydantic model."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
 
 def save_report_to_file(report, filename="news_analysis_report.md"):
+    """Write the full analysis report to a markdown file."""
     try:
-        with open(filename, "w", encoding='utf-8') as f:
-            # Key Findings & Summary
-            f.write(f"# News Analysis Report: {report.query_summary}\n\n")
-            f.write("## Key Findings & Summary\n\n")
-            f.write(f"{report.key_findings}\n\n")
-            
-            # Related Articles
-            f.write("## Related Articles\n\n")
-            for article in report.related_articles:
-                for title, url in article.items():
-                    f.write(f"- [{title}]({url})\n")
-            f.write("\n")
-            
-            # Related Words (wordcloud)
-            f.write("## Related Words\n\n")
-            f.write("*Wordcloud visualization would show these terms with size relative to frequency:*\n\n")
-            f.write(", ".join(report.related_words))
-            f.write("\n\n")
-            
-            # Topic Clusters
-            f.write("## Related Topic Clusters\n\n")
-            f.write("*Visualization would show bubbles with sizes relative to prevalence:*\n\n")
-            for cluster in report.topic_clusters:
-                f.write(f"- **{cluster.get('topic', 'N/A')}** (Size: {cluster.get('size', 'N/A')})\n")
-                related_narratives = cluster.get('related_narratives', [])
-                if related_narratives:
-                    f.write("  - Related narratives: " + ", ".join(related_narratives) + "\n")
-            f.write("\n")
-            
-            # Top Sources
-            f.write("## List of Top Sources\n\n")
-            f.write("| Domain | Factual | Articles | Engagement |\n")
-            f.write("|--------|---------|----------|------------|\n")
-            for source in report.top_sources:
-                f.write(f"| {source.domain} | {source.factual_rating} | {source.articles_count} | {source.engagement} |\n")
-            f.write("\n")
-            
-            # Top Hashtags
-            f.write("## Top Hashtags\n\n")
-            f.write("| Hashtag | Engagement Rate (%) | Reach | Sentiment |\n")
-            f.write("|---------|---------------------|-------|------------|\n")
-            for hashtag in report.top_hashtags:
-                f.write(f"| {hashtag.hashtag} | {hashtag.engagement_rate} | {hashtag.reach} | {hashtag.sentiment} |\n")
-            f.write("\n")
-            
-            # Time Series Graph
-            f.write("## Similar Posts Spread Over Time\n\n")
-            f.write("*Time series visualization would show:*\n\n")
-            for data_point in report.similar_posts_time_series:
-                f.write(f"- {data_point.date}: {data_point.count} posts\n")
-            f.write("\n")
-            
-            # Fake News Sites
-            f.write("## Most Shared Fake News Sites\n\n")
-            f.write("*Line chart visualization would show:*\n\n")
-            for site in report.fake_news_sites:
-                site_name = site.get('site', 'N/A')
-                shares = site.get('shares', 0)
-                f.write(f"- {site_name}: {shares} shares\n")
-            f.write("\n")
-            
-            # Content Analysis Metrics
-            f.write("## Content Analysis Metrics\n\n")
-            f.write("*Percentage bars visualization would show:*\n\n")
-            f.write(f"- Language: {report.content_analysis.language_percentage}%\n")
-            f.write(f"- Coordination: {report.content_analysis.coordination_percentage}%\n")
-            f.write(f"- Source: {report.content_analysis.source_percentage}%\n")
-            f.write(f"- Bot-like activity: {report.content_analysis.bot_like_activity_percentage}%\n")
-            f.write("\n")
-            
-            # Propaganda Analysis
-            f.write("## Propaganda and Misinformation Analysis\n\n")
-            f.write(f"### Overall Reliability Score: {report.propaganda_analysis.overall_reliability_score}/100\n\n")
-            
-            f.write("### Propaganda Techniques Detected\n\n")
-            f.write("| Technique | Frequency | Severity (0-10) | Example |\n")
-            f.write("|-----------|-----------|-----------------|--------|\n")
-            for technique in report.propaganda_analysis.propaganda_techniques:
-                f.write(f"| **{technique.technique_name}** | {technique.frequency} | {technique.severity} | {technique.example} |\n")
-            f.write("\n*Explanation of techniques:*\n\n")
-            for technique in report.propaganda_analysis.propaganda_techniques:
-                f.write(f"- **{technique.technique_name}**: {technique.explanation}\n")
-            f.write("\n")
-        
-            f.write("### Misinformation Indicators\n\n")
-            f.write("| Type | Confidence | Correction | Verification Sources |\n")
-            f.write("|------|------------|------------|----------------------|\n")
-            for indicator in report.propaganda_analysis.misinformation_indicators:
-                sources = ", ".join(indicator.source_verification)
-                f.write(f"| {indicator.indicator_type} | {indicator.confidence*100:.1f}% | {indicator.correction} | {sources} |\n")
-            f.write("\n")
-        
-            f.write("### Coordination Patterns\n\n")
-            for pattern in report.propaganda_analysis.coordination_patterns:
-                f.write(f"**{pattern.pattern_type}** (Strength: {pattern.strength*100:.1f}%)\n")
-                f.write(f"- Entities involved: {', '.join(pattern.entities_involved)}\n")
-                f.write(f"- Timeline: {pattern.timeline}\n\n")
-        
-            f.write("### Bot Activity Metrics\n\n")
-            bot_metrics = report.propaganda_analysis.bot_activity_metrics
-            f.write(f"**Bot Likelihood Score: {bot_metrics.bot_likelihood_score*100:.1f}%**\n\n")
-            f.write(f"Account Creation Patterns: {bot_metrics.account_creation_patterns}\n\n")
-            f.write("Behavioral Indicators:\n")
-            for indicator in bot_metrics.behavioral_indicators:
-                f.write(f"- {indicator}\n")
-            f.write(f"\nNetwork Analysis: {bot_metrics.network_analysis}\n\n")
-        
-            f.write("### Most Shared Fake News Sites\n\n")
-            f.write("| Domain | Shares | Engagement | Known False Stories | Verification Failures |\n")
-            f.write("|--------|--------|------------|---------------------|----------------------|\n")
-            for site in report.propaganda_analysis.fake_news_sites:
-                failures = ", ".join(site.verification_failures[:2]) + (", ..." if len(site.verification_failures) > 2 else "")
-                f.write(f"| {site.domain} | {site.shares} | {site.engagement} | {site.known_false_stories} | {failures} |\n")
-            f.write("\n")
-        
-            f.write("### Deceptive Practices by Domain\n\n")
-            for site in report.propaganda_analysis.fake_news_sites:
-                f.write(f"**{site.domain}**:\n")
-                for practice in site.deceptive_practices:
-                    f.write(f"- {practice}\n")
-                f.write("\n")
-        
-            f.write("### Information Manipulation Timeline\n\n")
-            f.write("*Timeline showing how information evolved and spread:*\n\n")
-            for entry in report.propaganda_analysis.manipulation_timeline:
-                f.write(f"- **{entry.get('date', 'N/A')}**: {entry.get('event', 'N/A')}\n")
-            f.write("\n")
-        
-            f.write("### Narrative Fingerprint\n\n")
-            f.write("*Distinctive narrative patterns and their strength:*\n\n")
-            for narrative, strength in report.propaganda_analysis.narrative_fingerprint.items():
-                f.write(f"- **{narrative}**: {strength*100:.1f}%\n")
-            f.write("\n")
-        
-            f.write("### How to Verify This Information\n\n")
-            for i, step in enumerate(report.propaganda_analysis.recommended_verification_steps, 1):
-                f.write(f"{i}. {step}\n")
-            f.write("\n")
-            
-            # Facts Comparison
-            f.write("## Facts Gathered from Platform\n\n")
-            for fact in report.platform_facts:
-                f.write(f"- {fact}\n")
-            f.write("\n")
-            
-            f.write("## Facts Gathered from Relevant Sources\n\n")
-            for fact in report.cross_source_facts:
-                f.write(f"- {fact}\n")
-        
-        print(f"Report saved to {filename}")
+        md = generate_report_markdown(report)
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(md)
+        _logger.info("Report saved to %s", filename)
         return True
     except Exception as e:
-        st.error(f"Failed to save report: {e}")
+        _logger.error("Failed to save report: %s", e)
         return False
+
+
+def generate_report_markdown(report):
+    """Return the full report as a markdown string."""
+    lines = []
+
+    # ── Title & Key Findings ──
+    query_summary = _get(report, "query_summary", "News Analysis")
+    lines.append(f"# News Analysis Report: {query_summary}\n")
+    lines.append(f"Generated on: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    lines.append("---\n")
+
+    key_findings = _get(report, "key_findings")
+    if key_findings:
+        lines.append("## Key Findings & Summary\n")
+        lines.append(f"{key_findings}\n")
+
+    # ── Related Articles ──
+    related_articles = _get(report, "related_articles", [])
+    if related_articles:
+        lines.append("## Related Articles\n")
+        lines.append("| Title | Source | Published | URL |")
+        lines.append("|-------|--------|-----------|-----|")
+        for article in related_articles:
+            title = _get(article, "title", "N/A")
+            source = _get(article, "source", "N/A")
+            published = _get(article, "published_date", "N/A")
+            url = _get(article, "url", "#")
+            lines.append(f"| {title} | {source} | {published} | [Link]({url}) |")
+        lines.append("")
+
+    # ── Related Keywords ──
+    related_words = _get(report, "related_words", [])
+    if related_words:
+        lines.append("## Related Keywords\n")
+        lines.append("*Word cloud visualization — size proportional to frequency:*\n")
+        lines.append(", ".join(related_words))
+        lines.append("")
+
+    # ── Topic Clusters ──
+    topic_clusters = _get(report, "topic_clusters", [])
+    if topic_clusters:
+        lines.append("## Topic Clusters\n")
+        lines.append("*Bubble chart — size proportional to article count:*\n")
+        lines.append("| Cluster | Keywords | Articles |")
+        lines.append("|---------|----------|----------|")
+        for cluster in topic_clusters:
+            name = _get(cluster, "cluster_name", "Unknown")
+            keywords = _get(cluster, "keywords", [])
+            count = _get(cluster, "article_count", 0)
+            kw_str = ", ".join(keywords) if keywords else "—"
+            lines.append(f"| **{name}** | {kw_str} | {count} |")
+        lines.append("")
+
+    # ── Top Sources ──
+    top_sources = _get(report, "top_sources", [])
+    if top_sources:
+        lines.append("## Top Sources\n")
+        lines.append("| Domain | Factual Rating | Articles | Engagement |")
+        lines.append("|--------|----------------|----------|------------|")
+        for source in top_sources:
+            domain = _get(source, "domain", "N/A")
+            factual = _get(source, "factual_rating", "N/A")
+            articles = _get(source, "articles_count", 0)
+            engagement = _get(source, "engagement", 0)
+            lines.append(f"| {domain} | {factual} | {articles} | {engagement} |")
+        lines.append("")
+
+    # ── Top Hashtags ──
+    top_hashtags = _get(report, "top_hashtags", [])
+    if top_hashtags:
+        lines.append("## Top Hashtags\n")
+        lines.append("| Hashtag | Engagement Rate (%) | Reach | Sentiment |")
+        lines.append("|---------|---------------------|-------|-----------|")
+        for ht in top_hashtags:
+            hashtag = _get(ht, "hashtag", "N/A")
+            eng_rate = _get(ht, "engagement_rate", 0.0)
+            reach = _get(ht, "reach", 0)
+            sentiment = _get(ht, "sentiment", "Neutral")
+            lines.append(f"| {hashtag} | {eng_rate:.1f} | {reach} | {sentiment} |")
+        lines.append("")
+
+    # ── Similar Posts Time Series ──
+    time_series = _get(report, "similar_posts_time_series", [])
+    if time_series:
+        lines.append("## Similar Posts Over Time\n")
+        lines.append("*Time series line chart:*\n")
+        lines.append("| Date | Post Count |")
+        lines.append("|------|------------|")
+        for entry in time_series:
+            date = _get(entry, "date", "N/A")
+            count = _get(entry, "count", 0)
+            lines.append(f"| {date} | {count} |")
+        lines.append("")
+
+    # ── Fake News Sites (simple list) ──
+    fake_news_sites = _get(report, "fake_news_sites", [])
+    if fake_news_sites:
+        lines.append("## Flagged Fake News Sites\n")
+        for site in fake_news_sites:
+            lines.append(f"- ⚠️ {site}")
+        lines.append("")
+
+    # ── Content Analysis Metrics ──
+    content_analysis = _get(report, "content_analysis")
+    if content_analysis:
+        lines.append("## Content Analysis Metrics\n")
+        lines.append("*Percentage bar visualization:*\n")
+        lang = _get(content_analysis, "language_percentage", 0.0)
+        coord = _get(content_analysis, "coordination_percentage", 0.0)
+        src = _get(content_analysis, "source_percentage", 0.0)
+        bot = _get(content_analysis, "bot_like_activity_percentage", 0.0)
+        lines.append(f"- Language: {lang}%")
+        lines.append(f"- Coordination: {coord}%")
+        lines.append(f"- Source: {src}%")
+        lines.append(f"- Bot-like activity: {bot}%")
+        lines.append("")
+
+    # ── Propaganda & Misinformation Analysis ──
+    propaganda = _get(report, "propaganda_analysis")
+    if propaganda:
+        lines.append("## Propaganda and Misinformation Analysis\n")
+
+        reliability = _get(propaganda, "overall_reliability_score", 0)
+        lines.append(f"### Overall Reliability Score: {reliability}/100\n")
+
+        # Propaganda Techniques
+        techniques = _get(propaganda, "propaganda_techniques", [])
+        if techniques:
+            lines.append("### Propaganda Techniques Detected\n")
+            lines.append("| Technique | Frequency | Severity (0-10) | Example |")
+            lines.append("|-----------|-----------|-----------------|---------|")
+            for tech in techniques:
+                name = _get(tech, "technique_name", "Unknown")
+                freq = _get(tech, "frequency", 0)
+                sev = _get(tech, "severity", 0)
+                ex = _get(tech, "example", "")
+                lines.append(f"| **{name}** | {freq} | {sev} | {ex} |")
+            lines.append("")
+            lines.append("*Explanation of techniques:*\n")
+            for tech in techniques:
+                name = _get(tech, "technique_name", "Unknown")
+                explanation = _get(tech, "explanation", "")
+                if explanation:
+                    lines.append(f"- **{name}**: {explanation}")
+            lines.append("")
+
+        # Misinformation Indicators
+        indicators = _get(propaganda, "misinformation_indicators", [])
+        if indicators:
+            lines.append("### Misinformation Indicators\n")
+            lines.append("| Type | Confidence | Correction | Verification Sources |")
+            lines.append("|------|------------|------------|----------------------|")
+            for ind in indicators:
+                i_type = _get(ind, "indicator_type", "Unknown")
+                conf = _get(ind, "confidence", 0)
+                corr = _get(ind, "correction", "")
+                sources = _get(ind, "source_verification", [])
+                src_str = ", ".join(sources) if sources else "—"
+                lines.append(f"| {i_type} | {conf*100:.1f}% | {corr} | {src_str} |")
+            lines.append("")
+
+        # Coordination Patterns
+        coordination = _get(propaganda, "coordination_patterns", [])
+        if coordination:
+            lines.append("### Coordination Patterns\n")
+            for pattern in coordination:
+                p_type = _get(pattern, "pattern_type", "Unknown")
+                strength = _get(pattern, "strength", 0)
+                entities = _get(pattern, "entities_involved", [])
+                timeline = _get(pattern, "timeline", "")
+                lines.append(f"**{p_type}** (Strength: {strength*100:.1f}%)")
+                if entities:
+                    lines.append(f"- Entities involved: {', '.join(entities)}")
+                if timeline:
+                    lines.append(f"- Timeline: {timeline}")
+                lines.append("")
+
+        # Bot Activity Metrics
+        bot_metrics = _get(propaganda, "bot_activity_metrics", {})
+        if bot_metrics:
+            bot_score = _get(bot_metrics, "bot_likelihood_score", 0)
+            lines.append("### Bot Activity Metrics\n")
+            lines.append(f"**Bot Likelihood Score: {bot_score*100:.1f}%**\n")
+            patterns = _get(bot_metrics, "account_creation_patterns", "")
+            if patterns:
+                lines.append(f"Account Creation Patterns: {patterns}\n")
+            indicators_list = _get(bot_metrics, "behavioral_indicators", [])
+            if indicators_list:
+                lines.append("Behavioral Indicators:")
+                for ind in indicators_list:
+                    lines.append(f"- {ind}")
+            network = _get(bot_metrics, "network_analysis", "")
+            if network:
+                lines.append(f"\nNetwork Analysis: {network}")
+            lines.append("")
+
+        # Fake News Network Sites
+        fake_sites = _get(propaganda, "fake_news_sites", [])
+        if fake_sites:
+            lines.append("### Fake News Network Sites\n")
+            lines.append("| Domain | Shares | Engagement | Known False Stories | Verification Failures |")
+            lines.append("|--------|--------|------------|---------------------|----------------------|")
+            for site in fake_sites:
+                domain = _get(site, "domain", "Unknown")
+                shares = _get(site, "shares", 0)
+                engagement = _get(site, "engagement", 0)
+                false_stories = _get(site, "known_false_stories", 0)
+                failures = _get(site, "verification_failures", [])
+                fail_str = ", ".join(failures[:2]) + (", ..." if len(failures) > 2 else "") if failures else "—"
+                lines.append(f"| {domain} | {shares} | {engagement} | {false_stories} | {fail_str} |")
+            lines.append("")
+
+            lines.append("### Deceptive Practices by Domain\n")
+            for site in fake_sites:
+                domain = _get(site, "domain", "Unknown")
+                practices = _get(site, "deceptive_practices", [])
+                if practices:
+                    lines.append(f"**{domain}**:")
+                    for p in practices:
+                        lines.append(f"- {p}")
+                    lines.append("")
+
+        # Manipulation Timeline
+        timeline = _get(propaganda, "manipulation_timeline", [])
+        if timeline:
+            lines.append("### Information Manipulation Timeline\n")
+            for entry in timeline:
+                date = _get(entry, "date", "N/A") if isinstance(entry, dict) else "N/A"
+                event = _get(entry, "event", "N/A") if isinstance(entry, dict) else str(entry)
+                lines.append(f"- **{date}**: {event}")
+            lines.append("")
+
+        # Narrative Fingerprint
+        fingerprint = _get(propaganda, "narrative_fingerprint", {})
+        if fingerprint:
+            lines.append("### Narrative Fingerprint\n")
+            for narrative, strength in fingerprint.items():
+                lines.append(f"- **{narrative}**: {strength*100:.1f}%")
+            lines.append("")
+
+        # Verification Steps
+        steps = _get(propaganda, "recommended_verification_steps", [])
+        if steps:
+            lines.append("### How to Verify This Information\n")
+            for i, step in enumerate(steps, 1):
+                lines.append(f"{i}. {step}")
+            lines.append("")
+
+    # ── Platform Facts ──
+    platform_facts = _get(report, "platform_facts", [])
+    if platform_facts:
+        lines.append("## Facts Gathered from Platform\n")
+        for fact in platform_facts:
+            lines.append(f"- {fact}")
+        lines.append("")
+
+    # ── Cross-Source Facts ──
+    cross_source_facts = _get(report, "cross_source_facts", [])
+    if cross_source_facts:
+        lines.append("## Facts Gathered from Relevant Sources\n")
+        for fact in cross_source_facts:
+            lines.append(f"- {fact}")
+        lines.append("")
+
+    # ── Analysis Note ──
+    note = _get(report, "analysis_note", "")
+    if note and note != "No specific notes.":
+        lines.append(f"---\n\n*Note: {note}*\n")
+
+    lines.append("---\n")
+    lines.append("*This report was generated using automated AI analysis tools.*")
+    lines.append("*Results should be verified with additional sources for critical decisions.*")
+
+    return "\n".join(lines)

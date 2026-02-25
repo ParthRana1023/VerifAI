@@ -4,9 +4,9 @@ from crewai_tools import SerperDevTool, ScrapeWebsiteTool
 from setup import setup_crewai_config, check_llm_status, get_llm
 from cache_service import search_cache, get_cache_stats, cache_articles
 import streamlit as st
-import logging
+from logger_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @tool("Search Local Cache")
@@ -55,16 +55,16 @@ class RealtimeCachedScrapeTool(ScrapeWebsiteTool):
         return content
 
 
-def create_news_analysis_agents():
+def create_news_analysis_agents(llm_provider="gemini", model_name=None):
     """Create 4 optimized agents for news analysis with minimal token usage."""
-    setup_crewai_config()
+    setup_crewai_config(llm_provider)
 
-    llm_ok, llm_msg = check_llm_status()
+    llm_ok, llm_msg = check_llm_status(llm_provider)
     if not llm_ok:
         st.error(f"LLM issue: {llm_msg}")
         return None
 
-    llm = get_llm()
+    llm = get_llm(llm_provider, model_name=model_name)
     if not llm:
         st.error("Failed to initialize LLM")
         return None
@@ -86,7 +86,7 @@ def create_news_analysis_agents():
                           "extracts key themes from headlines, and rates source reliability.",
                 tools=[cached_search_tool, serper_tool, scrape_tool],
                 llm=llm,
-                verbose=True,
+                verbose=False,
                 allow_delegation=False,
                 memory=False,
                 max_iter=2,
@@ -99,7 +99,7 @@ def create_news_analysis_agents():
                           "engagement levels, and overall public sentiment on a topic.",
                 tools=[cached_search_tool, serper_tool],
                 llm=llm,
-                verbose=True,
+                verbose=False,
                 allow_delegation=False,
                 memory=False,
                 max_iter=2,
@@ -111,7 +111,7 @@ def create_news_analysis_agents():
                 backstory="An analyst who structures data by source reliability, identifies "
                           "patterns, flags red flags, and suggests verification steps.",
                 llm=llm,
-                verbose=True,
+                verbose=False,
                 allow_delegation=False,
                 memory=False,
                 max_iter=2,
@@ -123,7 +123,7 @@ def create_news_analysis_agents():
                 backstory="A report writer who efficiently compiles analysis results into "
                           "the required JSON schema format without additional research.",
                 llm=llm,
-                verbose=True,
+                verbose=False,
                 allow_delegation=False,
                 memory=False,
                 max_iter=2,

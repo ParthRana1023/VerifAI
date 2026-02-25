@@ -1,14 +1,62 @@
 import os
 import praw
 import re
-import logging
 from collections import Counter
+from logger_config import get_logger
 from app import run_news_analysis
 from save_report import save_report_to_file
 from setup import setup_api_keys
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def compute_reddit_engagement(reddit_data: dict) -> dict:
+    """Derive real engagement metrics from PRAW-scraped Reddit data.
+
+    Returns a dict suitable for passing as ``platform_metrics`` to
+    ``app.run_news_analysis()``.
+    """
+    score = reddit_data.get("score", 0)
+    num_comments = reddit_data.get("num_comments", 0)
+    upvote_ratio = reddit_data.get("upvote_ratio", 0.5)
+
+    # Estimate total votes from score and ratio
+    # score = upvotes - downvotes, ratio = upvotes / total_votes
+    # So total_votes ≈ score / (2 * ratio - 1) when ratio > 0.5
+    if upvote_ratio > 0.5:
+        total_votes = int(score / (2 * upvote_ratio - 1))
+    else:
+        total_votes = max(score, 1)
+
+    # Reddit rule of thumb: ~10x lurkers per voter
+    reach_estimate = total_votes * 10
+
+    # Engagement rate = (interactions / reach) * 100
+    total_interactions = score + num_comments
+    engagement_rate = (total_interactions / max(reach_estimate, 1)) * 100
+
+    # Derive sentiment from upvote ratio
+    if upvote_ratio > 0.7:
+        sentiment = "Positive"
+    elif upvote_ratio > 0.4:
+        sentiment = "Mixed"
+    else:
+        sentiment = "Negative"
+
+    # Derive comment engagement metrics
+    comment_scores = []
+    for comment in reddit_data.get("top_comments", []):
+        comment_scores.append(comment.get("score", 0))
+    avg_comment_score = sum(comment_scores) / max(len(comment_scores), 1)
+
+    return {
+        "engagement_rate": round(engagement_rate, 2),
+        "reach": reach_estimate,
+        "total_interactions": total_interactions,
+        "total_votes": total_votes,
+        "avg_comment_score": round(avg_comment_score, 1),
+        "sentiment_from_ratio": sentiment,
+    }
 
 def scrape_reddit_data(url: str) -> dict:
     """
@@ -133,58 +181,57 @@ def is_reddit_url(text: str) -> bool:
 
 def main():
     if "error" in reddit_data:
-        print(f"Error: {reddit_data['error']}")
+        logger.error("Error: %s", reddit_data['error'])
         return
 
     keywords = extract_keywords(reddit_data)
     if not keywords:
-        print("No keywords extracted from the post.")
+        logger.error("No keywords extracted from the post.")
         return
 
-    # Convert keywords to comma-separated string
     keyword_list = [kw['text'] for kw in keywords]
-    user_query = "News analysis for: " + ", ".join(keyword_list[:5])  # Top 5 keywords
-    
-    # Verify directory exists
+    user_query = "News analysis for: " + ", ".join(keyword_list[:5])
+
     if not os.path.exists(os.path.dirname(os.path.abspath(__file__))):
-        print("Invalid directory path")
+        logger.error("Invalid directory path")
         return
 
-    # Set up API keys
     if not setup_api_keys():
-        print("Invalid API keys. Exiting.")
+        logger.error("Invalid API keys. Exiting.")
         return
 
-    # Run analysis and save
     try:
-        print("\nStarting analysis...")
+        logger.info("Starting analysis...")
         report = run_news_analysis(
             user_query=user_query,
             keywords=keyword_list
         )
         if report:
             save_report_to_file(report)
-            print("Analysis complete!")
+            logger.info("Analysis complete!")
         else:
-            print("Failed to generate report")
-            
+            logger.error("Failed to generate report")
+
     except Exception as e:
-        print(f"Analysis failed: {str(e)}")
-    
-# Example usage
+        logger.error("Analysis failed: %s", e)
+
+
 if __name__ == "__main__":
+    from logger_config import setup_logging
+    setup_logging("INFO")
+
     url = input("Enter a Reddit URL: ")
-    
+
     reddit_data = scrape_reddit_data(url)
     keywords = extract_keywords(reddit_data)
-    
+
     if "error" not in reddit_data:
-        print(f"Title: {reddit_data['title']}\n")
-        print(f"Content:\n{reddit_data['selftext']}\n")
-        print("Keywords:")
+        logger.info("Title: %s", reddit_data['title'])
+        logger.info("Content: %s", reddit_data['selftext'])
+        logger.info("Keywords:")
         for kw in keywords:
-            print(f"- {kw['text']}: {kw['frequency']}")
+            logger.info("- %s: %d", kw['text'], kw['frequency'])
     else:
-        print(f"Error: {reddit_data['error']}")
+        logger.error("Error: %s", reddit_data['error'])
 
     main()

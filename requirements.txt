@@ -22,3 +22,4 @@ loguru
 plotly
 matplotlib
 seaborn
+wordcloud

@@ -11,8 +11,14 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import os
+from logger_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Suppress the harmless "position_ids" UNEXPECTED key warning from transformers.
+# Newer transformers versions removed position_ids from BertEmbeddings, but the
+# BAAI/bge-small-en-v1.5 checkpoint still includes it — safe to ignore.
+logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
+
+logger = get_logger(__name__)
 
 # Persistent storage directory
 CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_cache")

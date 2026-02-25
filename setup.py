@@ -36,62 +36,71 @@ import requests
 import time
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.language_models.chat_models import BaseChatModel
+from logger_config import get_logger
+
+_logger = get_logger(__name__)
 
 # Force CrewAI to use text-based ReAct prompting instead of native function calling.
-# Without this, LiteLLM detects Groq model supports function calling and sends tools
-# via the native API, but the model generates XML-style calls that Groq rejects.
 litellm.supports_function_calling = lambda model: False
 litellm.utils.supports_function_calling = lambda model: False
 
-def setup_crewai_config():
-    """Configure CrewAI to use Groq with proper settings"""
+def setup_crewai_config(provider="gemini"):
+    """Configure CrewAI to use Google Gemini with proper settings."""
     # Remove any existing OpenAI configuration so CrewAI doesn't try to use it
     for key in ["OPENAI_API_KEY", "OPENAI_MODEL_NAME", "OPENAI_API_BASE"]:
         os.environ.pop(key, None)
     
-    # Set CrewAI to use Groq
-    os.environ["CREWAI_LLM_PROVIDER"] = "groq"
-    os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY", "")
+    # Set CrewAI to use Gemini
+    os.environ["CREWAI_LLM_PROVIDER"] = "gemini"
+    os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
+    # Avoid "Both GOOGLE_API_KEY and GEMINI_API_KEY are set" warning
+    os.environ.pop("GOOGLE_API_KEY", None)
     
     # Disable function calling and telemetry globally
     os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
     os.environ["CREWAI_DISABLE_FUNCTION_CALLING"] = "true"
 
-def check_llm_status():
-    """Check if GROQ_API_KEY is set and valid."""
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if not groq_api_key:
-        return False, "GROQ_API_KEY is not set. Please set it in your environment or .env file."
-    
-    # Basic validation
-    if len(groq_api_key) < 10:
-        return False, "GROQ_API_KEY appears to be invalid. Please check your API key."
-        
-    return True, "Groq API key is set and appears valid."
+def check_llm_status(provider="gemini"):
+    """Check if the Gemini API key is set and valid."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return False, "GEMINI_API_KEY is not set. Please set it via the sidebar or environment."
+    if len(api_key) < 10:
+        return False, "GEMINI_API_KEY appears to be invalid. Please check your API key."
+    return True, "Gemini API key is set and appears valid."
 
 # Keep old name as alias for backward compatibility
 check_gemini_status = check_llm_status
 
-def get_llm() -> BaseChatModel:
-    """Initializes and returns the appropriate LLM based on configuration."""
+# Available Gemini models (display name → LiteLLM model string)
+GEMINI_MODELS = {
+    "Gemini 2.5 Flash": "gemini/gemini-2.5-flash",
+    "Gemini 3 Flash": "gemini/gemini-3-flash-preview",
+}
+DEFAULT_GEMINI_MODEL = "Gemini 2.5 Flash"
+
+def get_llm(provider=None, model_name=None) -> BaseChatModel:
+    """Initializes and returns a Gemini LLM.
+
+    Args:
+        provider: Kept for backward compat; ignored (always Gemini).
+        model_name: Display name of the model (e.g. "Gemini 2.5 Flash").
+                    Falls back to DEFAULT_GEMINI_MODEL.
+    """
     try:
-        provider = os.getenv("CREWAI_LLM_PROVIDER", "groq")
-        
-        if provider == "groq":
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
-                raise ValueError("GROQ_API_KEY not set. Get one at https://console.groq.com")
-            
-            # Use CrewAI's LLM class with LiteLLM format: groq/model-name
-            # max_rpm limits requests per minute to stay within Groq rate limits
-            return LLM(
-                model="groq/llama-3.3-70b-versatile",
-                api_key=groq_api_key
-            )
-        else:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY not set. Get one at https://aistudio.google.com/app/apikey")
+
+        model_name = model_name or DEFAULT_GEMINI_MODEL
+        litellm_model = GEMINI_MODELS.get(model_name, GEMINI_MODELS[DEFAULT_GEMINI_MODEL])
+
+        return LLM(
+            model=litellm_model,
+            api_key=gemini_api_key
+        )
     except Exception as e:
-        print(f"Error initializing LLM: {e}")
+        _logger.error("Error initializing LLM: %s", e)
         return None
 
 def setup_api_keys():
@@ -103,7 +112,7 @@ def setup_api_keys():
         if 'st' in globals():
             st.error("SERPER_API_KEY is required. Please set it in your environment, .env file, or via the sidebar.")
         else:
-            print("SERPER_API_KEY is required. Please set it in your environment or .env file.")
+            _logger.error("SERPER_API_KEY is required. Please set it in your environment or .env file.")
         return False
     
     # Basic validation - Serper keys are typically alphanumeric
@@ -111,7 +120,7 @@ def setup_api_keys():
         if 'st' in globals():
             st.error("SERPER_API_KEY appears to be invalid. Please check your API key.")
         else:
-            print("SERPER_API_KEY appears to be invalid. Please check your API key.")
+            _logger.error("SERPER_API_KEY appears to be invalid. Please check your API key.")
         return False
     
     return True
